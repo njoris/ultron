@@ -887,6 +887,33 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true, entry });
     }
 
+    // Modifier une mesure : renommer, changer d'unité, de thème ou de type.
+    const metricRoute = url.pathname.match(/^\/api\/metrics\/([\w-]+)$/);
+    if (req.method === 'PATCH' && metricRoute) {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      const def = db.metrics[metricRoute[1]];
+      if (!def) return sendJson(res, 404, { error: 'Mesure inconnue.' });
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      if (typeof body.label === 'string' && body.label.trim()) def.label = clip(body.label.trim(), 40);
+      if (typeof body.unit === 'string') def.unit = clip(body.unit.trim(), 12);
+      if (CATEGORIES.includes(body.category)) def.category = body.category;
+      if (['last', 'sum', 'check'].includes(body.agg)) def.agg = body.agg;
+      saveDb();
+      return sendJson(res, 200, { ok: true });
+    }
+
+    // Supprimer une mesure avec tout son historique (entrées et objectifs). La confirmation est côté interface.
+    if (req.method === 'DELETE' && metricRoute) {
+      const key = metricRoute[1];
+      if (!db.metrics[key]) return sendJson(res, 404, { error: 'Mesure inconnue.' });
+      delete db.metrics[key];
+      db.entries = db.entries.filter((e) => e.key !== key);
+      db.goals = db.goals.filter((g) => g.key !== key);
+      saveDb();
+      return sendJson(res, 200, { ok: true });
+    }
+
     const del = url.pathname.match(/^\/api\/(entries|goals|notes|memory)\/([\w-]+)$/);
     if (req.method === 'DELETE' && del) {
       const [, coll, id] = del;

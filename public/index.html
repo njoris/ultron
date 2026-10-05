@@ -209,8 +209,11 @@
   .entry-edit input[type="number"] { width: 110px; }
   .entry-edit input[type="date"] { width: 160px; }
   .entry-edit input[type="text"] { flex: 1; min-width: 140px; }
+  .entry-edit select { background: var(--steel-800); border: 1px solid var(--line); border-radius: 6px; color: var(--bone); padding: 7px 9px; font: 14px var(--body); }
   .entry-edit .save { background: var(--steel-600); border: 1px solid var(--line); border-radius: 6px; color: var(--bone); padding: 7px 14px; font-size: 14px; cursor: pointer; }
   .entry-edit .save:hover { background: var(--line); }
+  .entry-edit .danger { background: none; border: 1px solid var(--ember); border-radius: 6px; color: var(--ember); padding: 7px 14px; font-size: 14px; cursor: pointer; }
+  .entry-edit .danger:hover { background: var(--ember); color: var(--steel-900); }
   .entry-list { margin-top: 12px; }
   .entry-list .rows li.editing { outline: 1px solid var(--mint); outline-offset: 3px; border-radius: 4px; }
 
@@ -783,6 +786,32 @@ async function remove(coll, id) {
   refresh();
 }
 
+// Modifie une mesure (libellé, unité, thème, type), sans passer par l'IA.
+async function saveMetric(key) {
+  const payload = {
+    label: $('#ms-label').value,
+    unit: $('#ms-unit').value,
+    category: $('#ms-cat').value,
+    agg: $('#ms-agg').value,
+  };
+  metricFormFocused = false;
+  const res = await fetch(`/api/metrics/${key}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); addMsg('info', 'Modification impossible : ' + (e.error || 'erreur.')); return; }
+  metricSettingsOpen = false;
+  refresh();
+}
+
+// Supprime une mesure et tout son historique, après confirmation.
+async function deleteMetric(key, label) {
+  if (!confirm(`Supprimer « ${label} » et tout son historique ? C'est définitif.`)) return;
+  metricFormFocused = false;
+  const res = await fetch(`/api/metrics/${key}`, { method: 'DELETE' });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); addMsg('info', 'Suppression impossible : ' + (e.error || 'erreur.')); return; }
+  metricSettingsOpen = false;
+  if (selectedMetric === key) selectedMetric = null;
+  refresh();
+}
+
 // Ajoute (POST) ou corrige (PUT) une valeur à la main, sans passer par l'IA.
 async function saveEntry(key) {
   const vEl = $('#ee-value'), dEl = $('#ee-date'), nEl = $('#ee-note');
@@ -811,6 +840,8 @@ let selectedMetric = null;
 let range = Number(localStorage.getItem('ultron.range')) || 30;
 let editEntryId = null;          // entrée en cours de correction, sinon null (ajout)
 let metricFormFocused = false;   // vrai tant qu'un champ du formulaire a le focus : on gèle le re-render
+let metricSettingsOpen = false;  // panneau « modifier la mesure » ouvert
+const AGG_LABEL = { last: 'état relevé', sum: 'cumul du jour', check: 'habitude' };
 
 const dayOffset = (key, n) => { const d = new Date(key + 'T12:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const dayGap = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 864e5);
@@ -948,11 +979,26 @@ function metricDetail(m) {
             ' ',
             h('button', { class: 'x', type: 'button', onclick: () => remove('entries', e.id) }, 'supprimer')))))
       : h('p', { class: 'empty' }, 'Aucune valeur saisie pour l\'instant.'));
+  const settings = !metricSettingsOpen ? null : h('div', { class: 'entry-edit' },
+    h('h4', null, 'Modifier la mesure'),
+    h('div', { class: 'row' },
+      h('input', { id: 'ms-label', type: 'text', 'aria-label': 'Nom', placeholder: 'nom', value: m.label, onfocus: onf, onblur: onb }),
+      h('input', { id: 'ms-unit', type: 'text', 'aria-label': 'Unité', placeholder: 'unité', value: m.unit, onfocus: onf, onblur: onb }),
+      h('select', { id: 'ms-cat', 'aria-label': 'Thème', onfocus: onf, onblur: onb },
+        Object.keys(CAT_LABEL).map((c) => h('option', { value: c, selected: c === m.category ? true : null }, CAT_LABEL[c]))),
+      h('select', { id: 'ms-agg', 'aria-label': 'Type', onfocus: onf, onblur: onb },
+        Object.keys(AGG_LABEL).map((a) => h('option', { value: a, selected: a === m.agg ? true : null }, AGG_LABEL[a]))),
+      h('button', { type: 'button', class: 'save', onclick: () => saveMetric(m.key) }, 'Enregistrer')),
+    h('div', { class: 'row', style: 'margin-top:10px' },
+      h('button', { type: 'button', class: 'danger', onclick: () => deleteMetric(m.key, m.label) }, 'Supprimer la mesure et son historique')));
   return h('div', { class: 'detail' },
     h('div', { class: 'head' },
       h('h3', { style: 'margin:0;color:var(--bone);font-size:17px' }, m.label),
-      h('div', { class: 'seg', role: 'group', 'aria-label': 'Période' }, [[30, '30 jours'], [90, '90 jours'], [180, '6 mois']].map(([n, label]) =>
-        h('button', { type: 'button', 'aria-pressed': String(range === n), onclick: () => { range = n; localStorage.setItem('ultron.range', n); renderMetrics(); } }, label)))),
+      h('div', { style: 'display:flex; gap:10px; align-items:center' },
+        h('div', { class: 'seg', role: 'group', 'aria-label': 'Période' }, [[30, '30 jours'], [90, '90 jours'], [180, '6 mois']].map(([n, label]) =>
+          h('button', { type: 'button', 'aria-pressed': String(range === n), onclick: () => { range = n; localStorage.setItem('ultron.range', n); renderMetrics(); } }, label))),
+        h('button', { type: 'button', class: 'x', 'aria-expanded': String(metricSettingsOpen), onclick: () => { metricSettingsOpen = !metricSettingsOpen; renderMetrics(); } }, metricSettingsOpen ? 'fermer' : 'modifier'))),
+    settings,
     bigChart(m, reach?.target),
     h('div', { class: 'stats' }, stats),
     editor,
@@ -972,7 +1018,7 @@ function renderMetrics() {
       const reach = m.goals.find((g) => g.kind === 'reach');
       const shown = m.agg === 'sum' ? m.week : m.latest?.value;
       const delta = m.agg === 'last' && m.delta ? `${m.delta > 0 ? '+' : '−'}${nf.format(Math.abs(m.delta))}` : '';
-      return h('button', { class: 'tile', type: 'button', 'aria-expanded': String(selectedMetric === m.key), onclick: () => { selectedMetric = selectedMetric === m.key ? null : m.key; renderMetrics(); } },
+      return h('button', { class: 'tile', type: 'button', 'aria-expanded': String(selectedMetric === m.key), onclick: () => { selectedMetric = selectedMetric === m.key ? null : m.key; editEntryId = null; metricSettingsOpen = false; metricFormFocused = false; renderMetrics(); } },
         h('span', { class: 'label' }, h('span', null, m.label + (m.agg === 'sum' ? ', cette semaine' : '')),
           h('span', null, delta || (m.latest ? shortDate(m.latest.date) : ''))),
         h('span', { class: 'val' }, shown != null ? nf.format(shown) : '–', h('span', null, m.unit)),

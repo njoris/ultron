@@ -260,6 +260,7 @@
     </div>
     <div class="view" id="view-moi" hidden>
       <section class="today wide" id="me-head"></section>
+      <section class="wide" id="me-week"></section>
       <section id="me-goals"></section>
       <section id="me-rhythm"></section>
       <section class="wide" id="me-metrics"></section>
@@ -1037,6 +1038,47 @@ function renderMetrics() {
   $('#me-metrics').replaceChildren(...kids);
 }
 
+// « Ma semaine » : comparaison avec la semaine précédente, objectifs et régularité.
+function renderWeek() {
+  const tr = state.tracking;
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Ma semaine'))];
+  if (!tr.metrics.length) { $('#me-week').replaceChildren(...kids, h('p', { class: 'empty' }, 'Dicte tes premières mesures et ton bilan de la semaine apparaîtra ici.')); return; }
+  kids.push(h('p', { class: 'sub' }, `Régularité : ${plural(tr.logStreak.current, 'jour', 'jours')} de saisie d'affilée (record ${tr.logStreak.best}).`));
+
+  const cols = [];
+  // Cumuls et habitudes : total de la semaine contre la semaine dernière.
+  const weekly = tr.metrics.filter((m) => m.agg !== 'last');
+  if (weekly.length) cols.push(h('div', null, h('h3', null, 'Cette semaine'),
+    h('ul', { class: 'rows' }, weekly.map((m) => {
+      const u = m.unit ? ' ' + m.unit : '';
+      const cur = m.agg === 'check' ? plural(m.week, 'fois', 'fois') : `${nf.format(m.week)}${u}`;
+      const prevN = m.lastWeek ?? 0;
+      const diff = m.week - prevN;
+      const sign = diff > 0 ? '+' : diff < 0 ? '−' : '=';
+      const comp = diff === 0 ? 'comme la semaine dernière' : `${sign}${nf.format(Math.abs(diff))}${m.agg === 'check' ? '' : u} vs sem. dernière`;
+      return h('li', null, h('span', { class: 'name' }, m.label + ' : ' + cur), h('span', { class: 'meta' }, comp));
+    }))));
+  // États relevés : dernière valeur et tendance hebdomadaire.
+  const states = tr.metrics.filter((m) => m.agg === 'last');
+  if (states.length) cols.push(h('div', null, h('h3', null, 'Où tu en es'),
+    h('ul', { class: 'rows' }, states.map((m) => {
+      const u = m.unit ? ' ' + m.unit : '';
+      const val = m.latest ? `${nf.format(m.latest.value)}${u}` : '–';
+      const trend = m.slope == null ? 'pas assez de recul' : `${m.slope > 0 ? '+' : '−'}${nf.format(Math.abs(m.slope * 7))}${u}/sem.`;
+      return h('li', null, h('span', { class: 'name' }, m.label + ' : ' + val), h('span', { class: 'meta' }, trend));
+    }))));
+  // Objectifs : tenus ou non.
+  const goals = tr.metrics.flatMap((m) => m.goals.map((g) => ({ label: m.label, g })));
+  if (goals.length) cols.push(h('div', null, h('h3', null, 'Objectifs'),
+    h('ul', { class: 'rows' }, goals.map(({ label, g }) => h('li', null,
+      h('span', { class: 'name' }, label),
+      h('span', { class: 'meta', style: g.status === 'behind' || g.status === 'stalled' ? 'color:var(--ember)' : (g.reached ? 'color:var(--mint)' : null) },
+        g.reached ? 'atteint' : (GOAL_STATUS[g.status] || '—')))))));
+
+  kids.push(h('div', { class: 'cols' }, cols));
+  $('#me-week').replaceChildren(...kids);
+}
+
 function renderJournal() {
   const tr = state.tracking;
   const kids = [h('div', { class: 'head' }, h('h2', null, 'Journal'))];
@@ -1076,7 +1118,7 @@ setView(view);
 
 function render() {
   renderToday(); renderProjects(); renderSessions();
-  renderMeHead(); renderGoals(); renderRhythm();
+  renderMeHead(); renderWeek(); renderGoals(); renderRhythm();
   if (!metricFormFocused) renderMetrics(); // on ne reconstruit pas le détail pendant une saisie
   renderJournal();
 }

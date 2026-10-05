@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ultron</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='13' fill='%23141720'/><circle cx='16' cy='16' r='6' fill='%23FF5A3C'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800&family=Schibsted+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* acier bleui + braise */
+    --steel-900: #141720;
+    --steel-800: #1C202B;
+    --steel-700: #272C3A;
+    --steel-600: #343A4C;
+    --line: #3B4257;
+    --fog: #9BA2B8;
+    --bone: #ECE8DF;
+    --ember: #FF5A3C;
+    --mint: #7ED6B5;
+    --amber: #F0B354;
+    --sky: #86B4FF;
+    --display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+    --body: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--steel-800);
+    color: var(--bone);
+    font: 400 15px/1.5 var(--body);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--bone); outline-offset: 3px; border-radius: 4px; }
+  h1, h2, h3, p, ul { margin: 0; }
+  ul { padding: 0; list-style: none; }
+
+  .app { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); min-height: 100%; }
+
+  /* ── colonne de gauche : Ultron ── */
+  .console {
+    background: var(--steel-900);
+    position: sticky; top: 0; height: 100vh;
+    display: flex; flex-direction: column;
+    padding: 24px 24px 20px;
+    border-right: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .brand h1 { font: 800 34px/1 var(--display); letter-spacing: .01em; }
+  .brand time { color: var(--fog); font-size: 14px; font-variant-numeric: tabular-nums; text-align: right; }
+
+  .core {
+    display: block; width: min(100%, 300px); aspect-ratio: 1; margin: 8px auto 0;
+    padding: 0; border: 0; background: none; border-radius: 50%;
+  }
+  .core canvas { width: 100%; height: 100%; display: block; }
+  .hint { min-height: 44px; text-align: center; color: var(--fog); font-size: 14px; padding: 0 8px; }
+  .hint.heard { color: var(--bone); }
+
+  .log { flex: 1; min-height: 0; overflow-y: auto; margin: 12px -8px 12px 0; padding-right: 8px; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin; scrollbar-color: var(--steel-600) transparent; }
+  .msg { max-width: 100%; overflow-wrap: anywhere; }
+  .msg.me { align-self: flex-end; max-width: 88%; background: var(--steel-700); padding: 8px 12px; border-radius: 12px 12px 2px 12px; color: var(--bone); }
+  .msg.ultron { font-size: 16px; line-height: 1.45; }
+  .msg.info { color: var(--fog); font-size: 14px; }
+  .msg.err { border-left: 2px solid var(--ember); padding-left: 10px; color: var(--bone); font-size: 14px; }
+  .applied { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; color: var(--mint); font-size: 13px; }
+  .applied li::before { content: "✓ "; }
+
+  .ask { display: flex; gap: 8px; }
+  .ask input {
+    flex: 1; min-width: 0; background: var(--steel-700); border: 1px solid transparent; border-radius: 8px;
+    color: var(--bone); font: inherit; padding: 10px 12px;
+  }
+  .ask input::placeholder { color: var(--fog); }
+  .ask input:focus { outline: none; border-color: var(--fog); }
+  .btn { background: var(--bone); color: var(--steel-900); border: 0; border-radius: 8px; padding: 10px 14px; font-weight: 600; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.quiet { background: none; color: var(--bone); border: 1px solid var(--line); font-weight: 500; }
+  .btn.quiet:hover { border-color: var(--fog); }
+  .toggles { display: flex; gap: 18px; margin-top: 12px; color: var(--fog); font-size: 14px; }
+  .toggles label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  .toggles input { accent-color: var(--ember); width: 15px; height: 15px; margin: 0; }
+
+  /* ── colonne de droite : le tableau de bord ── */
+  .board { padding: 24px clamp(20px, 4vw, 56px) 64px; min-width: 0; }
+  .views { display: flex; gap: 26px; margin-bottom: 30px; border-bottom: 1px solid var(--line); }
+  .views button { background: none; border: 0; padding: 0 0 10px; margin-bottom: -1px; font: 800 24px/1 var(--display); letter-spacing: .01em; color: var(--fog); border-bottom: 3px solid transparent; }
+  .views button:hover { color: var(--bone); }
+  .views button[aria-pressed="true"] { color: var(--bone); border-bottom-color: var(--ember); }
+  .view { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 44px 44px; align-content: start; }
+  .view[hidden] { display: none; }
+  .view > section { border-top: 1px solid var(--line); padding-top: 18px; min-width: 0; }
+  .wide { grid-column: 1 / -1; }
+  .view > section.today { border-top: 0; padding-top: 0; }
+  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+  h2 { font: 800 26px/1.1 var(--display); letter-spacing: .01em; }
+  .sub { color: var(--fog); font-size: 14px; }
+
+  .brief { font: 800 clamp(34px, 4.4vw, 60px)/1 var(--display); letter-spacing: .005em; max-width: 22ch; text-wrap: balance; }
+  .today-actions { margin: 18px 0 28px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 28px 36px; }
+  h3 { font: 600 15px/1.3 var(--body); color: var(--fog); margin-bottom: 8px; }
+
+  .rows > li { padding: 9px 0; border-top: 1px solid var(--steel-700); display: flex; justify-content: space-between; gap: 14px; align-items: baseline; }
+  .rows > li:first-child { border-top: 0; }
+  .rows .name { min-width: 0; overflow-wrap: anywhere; }
+  .rows .meta { color: var(--fog); font-size: 13px; white-space: nowrap; flex-shrink: 0; }
+  .late { color: var(--ember); }
+  .empty { color: var(--fog); max-width: 60ch; }
+  .empty code, .sub code { background: var(--steel-700); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  .warn { color: var(--amber); font-size: 14px; margin-bottom: 10px; }
+
+  .proj { padding: 14px 0; border-top: 1px solid var(--steel-700); }
+  .proj:first-of-type { border-top: 0; padding-top: 0; }
+  .proj header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .proj header a { font-weight: 600; font-size: 17px; }
+  .bar { display: flex; gap: 2px; height: 8px; margin: 9px 0 10px; border-radius: 4px; overflow: hidden; background: var(--steel-700); }
+  .bar i { display: block; min-width: 0; }
+  .s-done { background: var(--mint); } .s-review { background: var(--amber); } .s-doing { background: var(--sky); } .s-todo { background: var(--steel-600); }
+  .legend { display: flex; gap: 14px; color: var(--fog); font-size: 13px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+  .tickets li { display: flex; gap: 9px; align-items: baseline; padding: 3px 0; }
+  .tickets .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; transform: translateY(-1px); }
+  .tickets .tag { color: var(--fog); font-size: 13px; }
+  details { margin-top: 6px; }
+  summary { color: var(--fog); font-size: 14px; cursor: pointer; width: fit-content; }
+  summary:hover { color: var(--bone); }
+  details .tickets { margin-top: 6px; }
+
+  .sess { padding: 12px 0; border-top: 1px solid var(--steel-700); }
+  .sess:first-child { border-top: 0; padding-top: 0; }
+  .sess .top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .sess .who { font-weight: 600; font-size: 16px; overflow-wrap: anywhere; }
+  .sess .who small { color: var(--fog); font-weight: 400; font-size: 13px; margin-left: 6px; }
+  .state { font-size: 13px; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+  .state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .state.working { color: var(--sky); } .state.waiting { color: var(--amber); } .state.idle { color: var(--fog); }
+  .sess p { color: var(--fog); font-size: 14px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .sess p.title { color: var(--bone); -webkit-line-clamp: 1; margin: 2px 0; }
+  .sess p.pending { color: var(--amber); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+  .tile { background: var(--steel-700); border: 1px solid transparent; border-radius: 8px; padding: 14px 16px 12px; min-width: 0; display: block; text-align: left; width: 100%; }
+  .tile:hover { border-color: var(--line); }
+  .tile[aria-expanded="true"] { border-color: var(--fog); }
+  .tile > span { display: block; }
+  h3.cat { margin: 22px 0 10px; }
+  h3.cat:first-of-type { margin-top: 0; }
+
+  .goalrow { padding: 14px 0; border-top: 1px solid var(--steel-700); }
+  .goalrow:first-of-type { border-top: 0; padding-top: 0; }
+  .g-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .g-name { font-weight: 600; font-size: 17px; }
+  .g-status { font-size: 13px; white-space: nowrap; display: inline-flex; gap: 10px; align-items: baseline; color: var(--fog); }
+  .g-status.on_track, .g-status.reached { color: var(--mint); }
+  .g-status.behind { color: var(--ember); }
+  .g-status.stalled { color: var(--amber); }
+  .g-status .x { font-size: 16px; line-height: 1; }
+  .g-nums { margin: 2px 0 8px; color: var(--fog); }
+  .g-nums b { font: 800 38px/1.05 var(--display); color: var(--bone); font-variant-numeric: tabular-nums; }
+  .track { height: 6px; background: var(--steel-700); border-radius: 3px; overflow: hidden; }
+  .track i { display: block; height: 100%; background: var(--mint); border-radius: 3px; }
+  .track i.behind { background: var(--ember); } .track i.stalled { background: var(--amber); } .track i.unknown { background: var(--fog); }
+  .g-text { color: var(--fog); font-size: 14px; margin-top: 8px; max-width: 62ch; }
+
+  .heat { display: grid; grid-template-rows: repeat(7, 1fr); grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; max-width: 420px; }
+  .heat i { aspect-ratio: 1; border-radius: 3px; background: var(--steel-700); }
+  .heat .l1 { background: #3F6F66; } .heat .l2 { background: #5CA28F; } .heat .l3 { background: var(--mint); }
+  .heat .f { background: none; border: 1px dashed var(--steel-600); }
+  .habit { display: inline-flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .dots { display: inline-flex; gap: 3px; }
+  .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--steel-600); }
+  .dots i.on { background: var(--mint); }
+
+  .detail { background: var(--steel-700); border-radius: 8px; padding: 16px 18px; margin-top: 14px; }
+  .detail .head { align-items: center; }
+  svg.big { display: block; width: 100%; height: auto; }
+  svg.big text { font: 12px var(--body); fill: var(--fog); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button { background: none; border: 0; padding: 5px 11px; font-size: 13px; color: var(--fog); }
+  .seg button[aria-pressed="true"] { background: var(--steel-600); color: var(--bone); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px 20px; margin-top: 12px; }
+  .stats span { display: block; color: var(--fog); font-size: 13px; }
+  .stats b { font: 800 24px/1.2 var(--display); font-variant-numeric: tabular-nums; }
+  .tile .label { display: flex; justify-content: space-between; color: var(--fog); font-size: 14px; gap: 8px; }
+  .tile .val { font: 800 46px/1 var(--display); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .tile .val span { font: 500 16px var(--body); color: var(--fog); margin-left: 5px; }
+  .tile svg { display: block; width: 100%; height: 44px; margin: 10px 0 8px; overflow: visible; }
+  .goal { font-size: 13px; color: var(--fog); margin-top: 8px; }
+  .goal .track { height: 5px; background: var(--steel-600); border-radius: 3px; margin-top: 5px; overflow: hidden; }
+  .goal .track i { display: block; height: 100%; background: var(--mint); border-radius: 3px; }
+  .goal .line { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .goal .pct { white-space: nowrap; display: inline-flex; gap: 8px; align-items: baseline; }
+  .goal .x { font-size: 16px; line-height: 1; }
+  .x { background: none; border: 0; color: var(--fog); font-size: 13px; padding: 0; }
+  .x:hover { color: var(--ember); }
+  .under { margin-top: 28px; }
+
+  @media (max-width: 1180px) { .view { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 820px) {
+    .app { grid-template-columns: minmax(0, 1fr); }
+    .console { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+    .core { width: 200px; }
+    .log { max-height: 260px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="console" aria-label="Parler à Ultron">
+    <div class="brand">
+      <h1>Ultron</h1>
+      <time id="clock"></time>
+    </div>
+    <button class="core" id="core" type="button" aria-label="Parler à Ultron"><canvas id="orb"></canvas></button>
+    <p class="hint" id="hint" aria-live="polite"></p>
+    <div class="log" id="log"></div>
+    <form class="ask" id="ask">
+      <input id="q" type="text" autocomplete="off" placeholder="Écris à Ultron" aria-label="Écrire à Ultron">
+      <button class="btn" id="go" type="submit">Envoyer</button>
+    </form>
+    <div class="toggles">
+      <label><input type="checkbox" id="wake"> Écoute continue</label>
+      <label><input type="checkbox" id="speak"> Réponses à voix haute</label>
+    </div>
+  </aside>
+
+  <main class="board">
+    <nav class="views" aria-label="Vues">
+      <button type="button" id="tab-travail" aria-pressed="true">Travail</button>
+      <button type="button" id="tab-moi" aria-pressed="false">Moi</button>
+    </nav>
+    <div class="view" id="view-travail">
+      <section class="today wide" id="today"></section>
+      <section id="projects"></section>
+      <section id="sessions"></section>
+    </div>
+    <div class="view" id="view-moi" hidden>
+      <section class="today wide" id="me-head"></section>
+      <section id="me-goals"></section>
+      <section id="me-rhythm"></section>
+      <section class="wide" id="me-metrics"></section>
+      <section class="wide" id="me-journal"></section>
+    </div>
+  </main>
+</div>
+
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+
+/* Tout le contenu dynamique passe par h() : jamais d'innerHTML avec des données externes. */
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const k in attrs || {}) {
+    const v = attrs[k];
+    if (v == null || v === false) continue;
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of kids.flat(3)) {
+    if (c == null || c === false) continue;
+    e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+  return e;
+}
+const nf = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
+const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
+function ago(iso) {
+  const m = Math.max(0, (Date.now() - new Date(iso).getTime()) / 60000);
+  if (m < 1) return 'à l\'instant';
+  if (m < 60) return `il y a ${Math.round(m)} min`;
+  if (m < 60 * 24) return `il y a ${Math.round(m / 60)} h`;
+  return `il y a ${Math.round(m / 1440)} j`;
+}
+function shortDate(key) {
+  return new Date(key + 'T12:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+}
+
+/* ───────────────────────── l'orbe ───────────────────────── */
+const orb = (() => {
+  const cv = $('#orb'), ctx = cv.getContext('2d');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const N = 620, pts = [], pairs = [];
+  for (let i = 0; i < N; i++) {
+    const y = 1 - 2 * (i + 0.5) / N, r = Math.sqrt(1 - y * y), th = i * 2.399963;
+    pts.push({ x: Math.cos(th) * r, y, z: Math.sin(th) * r, seed: Math.random() * 6.283, sx: 0, sy: 0, sz: 0 });
+  }
+  for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+    const a = pts[i], b = pts[j], d = (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2;
+    if (d < 0.026) pairs.push(i, j);
+  }
+  const COLORS = { idle: [155, 162, 184], listening: [236, 232, 223], thinking: [240, 179, 84], speaking: [255, 90, 60] };
+  const SPIN = { idle: 0.10, listening: 0.18, thinking: 0.85, speaking: 0.22 };
+  let state = 'idle', col = COLORS.idle.slice(), level = 0, target = 0, rot = 0, last = 0, size = 0;
+  let levelSource = () => 0;
+
+  function resize() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    size = cv.clientWidth;
+    cv.width = cv.height = Math.round(size * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (reduce) draw(0);
+  }
+
+  function draw(t) {
+    const c = COLORS[state];
+    for (let k = 0; k < 3; k++) col[k] += (c[k] - col[k]) * (reduce ? 1 : 0.08);
+    const rgb = `${col[0] | 0},${col[1] | 0},${col[2] | 0}`;
+    const R = size * 0.39, cx = size / 2, cy = size / 2;
+    const cr = Math.cos(rot), sr = Math.sin(rot), ct = Math.cos(0.32), st = Math.sin(0.32);
+    ctx.clearRect(0, 0, size, size);
+    // la braise au centre : toujours là, plus vive quand il écoute ou parle
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * (0.55 + level * 0.35));
+    glow.addColorStop(0, `rgba(255,90,60,${0.20 + level * 0.45})`);
+    glow.addColorStop(1, 'rgba(255,90,60,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, size, size);
+    for (const p of pts) {
+      let k = 1 + 0.012 * Math.sin(t * 0.8 + p.seed) + level * 0.24 * (0.45 + 0.55 * Math.sin(p.seed + t * 3.1 + p.y * 4));
+      if (state === 'thinking') k += 0.035 * Math.sin(t * 5 + p.seed * 2);
+      const x = (p.x * cr + p.z * sr) * k, z0 = (-p.x * sr + p.z * cr) * k, y0 = p.y * k;
+      const y = y0 * ct - z0 * st, z = y0 * st + z0 * ct;
+      const persp = 1 / (1 - z * 0.28);
+      p.sx = cx + x * R * persp; p.sy = cy + y * R * persp; p.sz = z;
+    }
+    ctx.lineWidth = 0.6;
+    ctx.strokeStyle = `rgba(${rgb},${0.10 + level * 0.14})`;
+    ctx.beginPath();
+    for (let i = 0; i < pairs.length; i += 2) {
+      const a = pts[pairs[i]], b = pts[pairs[i + 1]];
+      if (a.sz < -0.15 || b.sz < -0.15) continue;
+      ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy);
+    }
+    ctx.stroke();
+    ctx.fillStyle = `rgb(${rgb})`;
+    for (const p of pts) {
+      const depth = (p.sz + 1.3) / 2.3;
+      ctx.globalAlpha = Math.min(1, 0.16 + depth * 0.84);
+      const s = 0.7 + depth * 1.5 + level * 0.8;
+      ctx.fillRect(p.sx - s / 2, p.sy - s / 2, s, s);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function frame(ms) {
+    const t = ms / 1000, dt = Math.min(0.05, t - last); last = t;
+    target = Math.max(0, Math.min(1, levelSource(t)));
+    level += (target - level) * 0.2;
+    rot += dt * SPIN[state];
+    draw(t);
+    requestAnimationFrame(frame);
+  }
+
+  new ResizeObserver(resize).observe(cv);
+  resize();
+  if (!reduce) requestAnimationFrame(frame);
+
+  return {
+    set(s, source) {
+      state = s; levelSource = source || (() => 0);
+      if (reduce) { level = s === 'idle' ? 0 : 0.45; draw(0); }
+    },
+  };
+})();
+
+/* ───────────────────────── micro (niveau sonore pour l'orbe) ───────────────────────── */
+const mic = {
+  stream: null, analyser: null, buf: null, ac: null,
+  async start() {
+    if (this.stream || !navigator.mediaDevices?.getUserMedia) return;
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.ac = new (window.AudioContext || window.webkitAudioContext)();
+      this.analyser = this.ac.createAnalyser();
+      this.analyser.fftSize = 512;
+      this.buf = new Uint8Array(this.analyser.fftSize);
+      this.ac.createMediaStreamSource(this.stream).connect(this.analyser);
+    } catch { this.stream = null; } // sans niveau micro, l'orbe reste simplement plus calme
+  },
+  stop() {
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.ac?.close().catch(() => {});
+    this.stream = this.analyser = this.ac = null;
+  },
+  level() {
+    if (!this.analyser) return 0.12;
+    this.analyser.getByteTimeDomainData(this.buf);
+    let sum = 0;
+    for (const v of this.buf) sum += ((v - 128) / 128) ** 2;
+    return Math.min(1, Math.sqrt(sum / this.buf.length) * 5);
+  },
+};
+
+/* ───────────────────────── état de l'interface ───────────────────────── */
+const ui = {
+  busy: false,
+  speaking: false,
+  wake: localStorage.getItem('ultron.wake') === '1',
+  speakOn: localStorage.getItem('ultron.speak') !== '0',
+  armedUntil: 0,
+};
+const hintEl = $('#hint');
+
+function idleHint() {
+  if (!SR) return 'La voix demande Chrome ou Edge. Ici, écris ta question.';
+  return ui.wake ? 'Dis « Ultron », puis ta question.' : 'Clique sur l\'orbe ou maintiens Espace pour parler.';
+}
+function setCore(state, hint, heard) {
+  const sources = {
+    listening: () => mic.level(),
+    thinking: () => 0.22,
+    speaking: (t) => speechEnv(t),
+  };
+  orb.set(state, sources[state]);
+  hintEl.textContent = hint ?? (state === 'idle' ? idleHint() : state === 'listening' ? 'Je t\'écoute.' : state === 'thinking' ? 'Je réfléchis.' : '');
+  hintEl.classList.toggle('heard', !!heard);
+}
+
+/* ───────────────────────── conversation ───────────────────────── */
+const logEl = $('#log');
+function addMsg(kind, text, applied) {
+  const el = h('div', { class: `msg ${kind}` }, text);
+  if (applied?.length) el.append(h('ul', { class: 'applied' }, applied.map((a) => h('li', null, a.text))));
+  logEl.append(el);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function send(text, viaVoice) {
+  text = text.trim();
+  if (!text || ui.busy) return;
+  ui.busy = true;
+  $('#go').disabled = true;
+  stopRec(true);
+  stopSpeaking();
+  addMsg('me', text);
+  setCore('thinking');
+  try {
+    const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error || `Erreur ${res.status}`);
+    addMsg('ultron', out.say, out.applied);
+    if (out.view) setView(out.view);
+    ui.busy = false;
+    // Ultron vient de poser une question à l'oral : on rouvre le micro sans attendre un clic.
+    const listenNext = viaVoice && ui.speakOn && SR && /\?\s*$/.test(out.say);
+    speak(out.say, listenNext ? () => {
+      if (ui.wake) { ui.armedUntil = Date.now() + 8000; setCore('listening'); if (!rec) startRec('wake'); }
+      else startRec('ptt');
+    } : null);
+    refresh();
+  } catch (e) {
+    addMsg('err', e.message === 'Failed to fetch' ? 'Le serveur Ultron ne répond pas. Relance « npm start » dans le dossier du projet.' : e.message);
+    ui.busy = false;
+    setCore('idle');
+    resumeWake();
+  } finally {
+    ui.busy = false;
+    $('#go').disabled = false;
+  }
+}
+
+$('#ask').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = $('#q');
+  const text = q.value;
+  if (!text.trim() || ui.busy) return;
+  q.value = '';
+  send(text);
+});
+
+/* ───────────────────────── synthèse vocale ───────────────────────── */
+let envPulse = 0, envAt = 0;
+function speechEnv(t) {
+  // Le navigateur ne donne pas accès au son de la synthèse : on suit les mots qu'elle annonce.
+  const since = performance.now() - envAt;
+  envPulse = Math.max(0, 1 - since / 260);
+  return 0.25 + 0.2 * Math.sin(t * 9) * Math.sin(t * 2.3) + envPulse * 0.5;
+}
+function pickVoice() {
+  const voices = speechSynthesis.getVoices().filter((v) => v.lang?.toLowerCase().startsWith('fr'));
+  return voices.find((v) => /google|natural|premium|enhanced|thomas|daniel/i.test(v.name)) || voices.find((v) => v.lang === 'fr-FR') || voices[0] || null;
+}
+function speak(text, done) {
+  const finish = () => { ui.speaking = false; setCore('idle'); resumeWake(); done?.(); };
+  if (!ui.speakOn || !('speechSynthesis' in window) || !text) return finish();
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'fr-FR';
+  const v = pickVoice();
+  if (v) u.voice = v;
+  u.rate = 1.06;
+  u.onstart = () => { ui.speaking = true; stopRec(true); setCore('speaking', ''); };
+  u.onboundary = () => { envAt = performance.now(); };
+  u.onend = finish;
+  u.onerror = finish;
+  speechSynthesis.speak(u);
+}
+function stopSpeaking() {
+  if ('speechSynthesis' in window && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel();
+  ui.speaking = false;
+}
+if ('speechSynthesis' in window) speechSynthesis.getVoices(); // déclenche le chargement des voix
+
+/* ───────────────────────── reconnaissance vocale ───────────────────────── */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const WAKE = /\b(ultron\w*|ultra)\b[\s,.!?:]*/i; // « ultra » : ce que Chrome entend souvent à la place
+let rec = null, recMode = null, heard = '', silent = false;
+
+function startRec(mode) {
+  if (!SR || rec || ui.busy || ui.speaking) return;
+  const r = new SR();
+  r.lang = 'fr-FR';
+  r.interimResults = true;
+  r.continuous = mode === 'wake';
+  heard = ''; silent = false; recMode = mode;
+  r.onstart = () => {
+    mic.start();
+    if (mode === 'ptt') setCore('listening');
+    else if (Date.now() < ui.armedUntil) setCore('listening');
+    else setCore('idle');
+  };
+  r.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const res = e.results[i], t = res[0].transcript.trim();
+      if (!res.isFinal) { interim += ' ' + t; continue; }
+      if (mode === 'ptt') heard += ' ' + t;
+      else onWakeFinal(t);
+    }
+    const live = (heard + interim).trim();
+    if (live && (mode === 'ptt' || Date.now() < ui.armedUntil || WAKE.test(live))) {
+      hintEl.textContent = live; hintEl.classList.add('heard');
+    }
+  };
+  r.onerror = (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      ui.wake = false; $('#wake').checked = false; localStorage.setItem('ultron.wake', '0');
+      silent = true;
+      setCore('idle', 'Le micro est bloqué. Autorise-le pour localhost dans la barre d\'adresse, puis réessaie.');
+    }
+  };
+  r.onend = () => {
+    rec = null;
+    if (mode === 'ptt') {
+      mic.stop();
+      const text = heard.trim();
+      if (text && !silent) return send(text, true);
+      if (!silent && !ui.busy && !ui.speaking) setCore('idle', text ? undefined : (ui.cancelled ? undefined : 'Je n\'ai rien entendu.'));
+      ui.cancelled = false;
+      return resumeWake();
+    }
+    // écoute continue : Chrome coupe tout seul après un silence, on relance
+    if (ui.wake && !ui.busy && !ui.speaking && !silent) setTimeout(() => startRec('wake'), 250);
+    else if (!ui.wake) mic.stop();
+  };
+  try { r.start(); rec = r; } catch { rec = null; }
+}
+
+function stopRec(discard) {
+  if (!rec) return;
+  if (discard) { silent = true; try { rec.abort(); } catch {} }
+  else { try { rec.stop(); } catch {} }
+}
+
+function onWakeFinal(text) {
+  if (Date.now() < ui.armedUntil) { ui.armedUntil = 0; return send(text, true); }
+  const m = text.match(WAKE);
+  if (!m) return;
+  const rest = text.slice(m.index + m[0].length).trim();
+  if (rest.length > 2) return send(rest, true);
+  ui.armedUntil = Date.now() + 8000; // « Ultron » seul : la phrase suivante est pour lui
+  setCore('listening');
+  setTimeout(() => { if (ui.armedUntil && Date.now() >= ui.armedUntil && !ui.busy && !ui.speaking) { ui.armedUntil = 0; setCore('idle'); } }, 8100);
+}
+
+function resumeWake() {
+  if (ui.wake && !rec && !ui.busy && !ui.speaking) startRec('wake');
+}
+
+function coreAction() {
+  if (ui.speaking) { stopSpeaking(); setCore('idle'); return resumeWake(); }
+  if (ui.busy) return;
+  if (!SR) return $('#q').focus();
+  if (ui.wake) { ui.armedUntil = Date.now() + 8000; if (!rec) startRec('wake'); return setCore('listening'); }
+  if (rec && recMode === 'ptt') return stopRec(false);
+  startRec('ptt');
+}
+$('#core').addEventListener('click', coreAction);
+
+let spaceDown = false;
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { stopSpeaking(); ui.cancelled = true; stopRec(true); if (!ui.busy) setCore('idle'); resumeWake(); return; }
+  if (e.code !== 'Space' || e.repeat || spaceDown || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+  e.preventDefault();
+  spaceDown = true;
+  if (!rec || recMode !== 'ptt') { if (rec) stopRec(true); stopSpeaking(); setTimeout(() => { if (spaceDown) startRec('ptt'); }, rec ? 300 : 0); }
+});
+addEventListener('keyup', (e) => {
+  if (e.code !== 'Space' || !spaceDown) return;
+  e.preventDefault();
+  spaceDown = false;
+  if (rec && recMode === 'ptt') stopRec(false);
+});
+
+$('#wake').checked = ui.wake;
+$('#speak').checked = ui.speakOn;
+$('#wake').disabled = !SR;
+$('#wake').addEventListener('change', (e) => {
+  ui.wake = e.target.checked;
+  localStorage.setItem('ultron.wake', ui.wake ? '1' : '0');
+  if (ui.wake) startRec('wake'); else { stopRec(true); mic.stop(); }
+  if (!ui.busy && !ui.speaking) setCore('idle');
+});
+$('#speak').addEventListener('change', (e) => {
+  ui.speakOn = e.target.checked;
+  localStorage.setItem('ultron.speak', ui.speakOn ? '1' : '0');
+  if (!ui.speakOn) stopSpeaking();
+});
+
+/* ───────────────────────── tableau de bord ───────────────────────── */
+let state = null;
+const openDetails = new Set();
+const lastSessionState = new Map();
+let firstLoad = true;
+
+async function refresh(force) {
+  try {
+    const res = await fetch('/api/state' + (force ? '?force=1' : ''));
+    if (!res.ok) throw new Error();
+    state = await res.json();
+    render();
+    announceSessions();
+    if (firstLoad) {
+      firstLoad = false;
+      for (const m of state.chat) addMsg(m.role === 'user' ? 'me' : 'ultron', m.text, m.applied);
+      if (!state.chat.length) addMsg('info', 'Demande-moi ce que tu as à faire aujourd\'hui, où en est un projet, ou dicte-moi tes chiffres du jour : « aujourd\'hui je pèse 80 kilos et j\'ai couru 3 km ».');
+    }
+  } catch {
+    if (!state) $('#today').replaceChildren(h('p', { class: 'empty' }, 'Le serveur Ultron ne répond pas. Lance « npm start » dans le dossier du projet, puis recharge cette page.'));
+  }
+}
+
+function allCards() {
+  return state.trello.boards.flatMap((b) => b.lists.flatMap((l) => l.cards));
+}
+
+function ticket(c, withBoard) {
+  return h('li', null,
+    h('span', { class: `dot s-${c.status}` }),
+    h('span', null,
+      h('a', { href: c.url, target: '_blank', rel: 'noopener' }, c.name),
+      c.labels.length ? h('span', { class: 'tag' }, '  ' + c.labels.join(', ')) : null,
+      withBoard ? h('span', { class: 'tag' }, '  ' + c.board) : null));
+}
+
+function renderToday() {
+  const cards = allCards();
+  const doing = cards.filter((c) => c.status === 'doing');
+  const review = cards.filter((c) => c.status === 'review');
+  const late = cards.filter((c) => c.overdue);
+  const dueToday = cards.filter((c) => c.dueToday);
+  const waiting = state.sessions.items.filter((s) => s.state === 'waiting');
+
+  const parts = [];
+  if (doing.length) parts.push(plural(doing.length, 'ticket en cours', 'tickets en cours'));
+  if (late.length) parts.push(`${late.length} en retard`);
+  if (dueToday.length) parts.push(`${dueToday.length} à rendre aujourd'hui`);
+  if (waiting.length) parts.push(waiting.length > 1 ? `${waiting.length} sessions t'attendent` : 'une session t\'attend');
+  let brief = parts.length ? parts.join(', ') + '.' : 'Rien d\'ouvert pour l\'instant.';
+  brief = brief[0].toUpperCase() + brief.slice(1);
+
+  const dateLine = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const col = (title, items, emptyText) => h('div', null, h('h3', null, title),
+    items.length ? h('ul', { class: 'rows' }, items) : h('p', { class: 'empty' }, emptyText));
+
+  $('#today').replaceChildren(
+    h('p', { class: 'sub', style: 'margin-bottom:10px' }, dateLine[0].toUpperCase() + dateLine.slice(1)),
+    h('p', { class: 'brief' }, brief),
+    h('div', { class: 'today-actions' },
+      h('button', { class: 'btn', type: 'button', onclick: () => send('Fais-moi le point sur ma journée.', true) }, 'Demander le point du jour'),
+      h('button', { class: 'btn quiet', type: 'button', onclick: () => refresh(true) }, 'Actualiser')),
+    h('div', { class: 'cols' },
+      col('En cours', doing.slice(0, 8).map((c) => h('li', null,
+        h('a', { class: 'name', href: c.url, target: '_blank', rel: 'noopener' }, c.name), h('span', { class: 'meta' }, c.board))),
+        state.trello.configured ? 'Aucun ticket dans une colonne « En cours ».' : 'Trello n\'est pas encore branché.'),
+      col('Échéances', [...late, ...dueToday].slice(0, 8).map((c) => h('li', null,
+        h('a', { class: 'name', href: c.url, target: '_blank', rel: 'noopener' }, c.name),
+        h('span', { class: 'meta' + (c.overdue ? ' late' : '') }, c.overdue ? `en retard, ${shortDate(c.due.slice(0, 10))}` : 'aujourd\'hui'))),
+        'Rien à rendre aujourd\'hui, rien en retard.'),
+      col('À valider', [
+        ...waiting.map((s) => h('li', null, h('span', { class: 'name' }, `Session ${s.project}`), h('span', { class: 'meta' }, ago(s.updatedAt)))),
+        ...review.slice(0, 6).map((c) => h('li', null, h('a', { class: 'name', href: c.url, target: '_blank', rel: 'noopener' }, c.name), h('span', { class: 'meta' }, c.list))),
+      ], 'Personne ne t\'attend.')));
+}
+
+function renderProjects() {
+  const t = state.trello;
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Projets'),
+    t.boards.length ? h('div', { class: 'legend' },
+      h('span', null, h('i', { class: 's-done' }), 'terminé'), h('span', null, h('i', { class: 's-review' }), 'en revue'),
+      h('span', null, h('i', { class: 's-doing' }), 'en cours'), h('span', null, h('i', { class: 's-todo' }), 'à faire')) : null)];
+
+  if (!t.configured) {
+    kids.push(h('p', { class: 'empty' }, 'Trello n\'est pas branché. Ajoute ', h('code', null, 'TRELLO_KEY'), ' et ', h('code', null, 'TRELLO_TOKEN'), ' dans le fichier ', h('code', null, '.env'), ' (le README explique où les créer), puis relance Ultron.'));
+  } else {
+    if (t.error) kids.push(h('p', { class: 'warn' }, t.error + (t.stale ? ' Affichage des dernières données reçues.' : '')));
+    if (!t.boards.length && !t.error) kids.push(h('p', { class: 'empty' }, 'Aucun tableau ouvert trouvé sur ce compte Trello.'));
+    for (const b of t.boards) {
+      const cards = b.lists.flatMap((l) => l.cards);
+      const active = cards.filter((c) => c.status === 'doing' || c.status === 'review');
+      const todo = cards.filter((c) => c.status === 'todo');
+      const id = 'todo-' + b.id;
+      kids.push(h('article', { class: 'proj' },
+        h('header', null, h('a', { href: b.url, target: '_blank', rel: 'noopener' }, b.name),
+          h('span', { class: 'sub' }, b.total ? `${b.counts.done} sur ${b.total} terminés` : 'aucun ticket')),
+        b.total ? h('div', { class: 'bar', role: 'img', 'aria-label': `${b.counts.done} terminés, ${b.counts.review} en revue, ${b.counts.doing} en cours, ${b.counts.todo} à faire` },
+          ['done', 'review', 'doing', 'todo'].map((s) => b.counts[s] ? h('i', { class: 's-' + s, style: `flex:${b.counts[s]}` }) : null)) : null,
+        active.length ? h('ul', { class: 'tickets' }, active.map((c) => ticket(c))) : null,
+        todo.length ? h('details', { open: openDetails.has(id), ontoggle: (e) => e.target.open ? openDetails.add(id) : openDetails.delete(id) },
+          h('summary', null, `À faire (${todo.length})`), h('ul', { class: 'tickets' }, todo.map((c) => ticket(c)))) : null));
+    }
+  }
+  $('#projects').replaceChildren(...kids);
+}
+
+const STATE_LABEL = { working: 'travaille', waiting: 't\'attend', idle: 'en pause' };
+function renderSessions() {
+  const s = state.sessions;
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Sessions Claude Code'))];
+  if (!s.found) kids.push(h('p', { class: 'empty' }, 'Aucun dossier Claude Code trouvé sur cette machine. Dès que tu lances ', h('code', null, 'claude'), ' dans un projet, la session apparaît ici.'));
+  else if (!s.items.length) kids.push(h('p', { class: 'empty' }, 'Aucune session ces trois derniers jours.'));
+  else kids.push(h('div', null, s.items.map((x) => h('div', { class: 'sess' },
+    h('div', { class: 'top' },
+      h('span', { class: 'who' }, x.project, x.branch ? h('small', null, x.branch) : null),
+      h('span', { class: `state ${x.state}` }, `${STATE_LABEL[x.state]}, ${ago(x.updatedAt)}`)),
+    h('p', { class: 'title' }, x.title),
+    x.pending ? h('p', { class: 'pending' }, x.pending) : null,
+    x.lastReply ? h('p', null, x.lastReply) : null))));
+  $('#sessions').replaceChildren(...kids);
+}
+
+function sparkline(points, goal) {
+  const W = 220, H = 44;
+  if (!points.length) return null;
+  const vals = points.map((p) => p.value).concat(goal != null ? [goal] : []);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (hi === lo) { hi += 1; lo -= 1; }
+  const x = (i) => points.length === 1 ? W : (i / (points.length - 1)) * W;
+  const y = (v) => H - 3 - ((v - lo) / (hi - lo)) * (H - 6);
+  const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
+  const last = points[points.length - 1];
+  const wrap = document.createElement('div');
+  // chaîne construite uniquement à partir de nombres : pas de donnée externe ici
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    ${goal != null ? `<line x1="0" x2="${W}" y1="${y(goal).toFixed(1)}" y2="${y(goal).toFixed(1)}" stroke="#7ED6B5" stroke-width="1" stroke-dasharray="3 4" vector-effect="non-scaling-stroke"/>` : ''}
+    ${points.length > 1 ? `<path d="${d}" fill="none" stroke="#ECE8DF" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>` : ''}
+    <circle cx="${x(points.length - 1).toFixed(1)}" cy="${y(last.value).toFixed(1)}" r="2.6" fill="#FF5A3C"/></svg>`;
+  return wrap.firstElementChild;
+}
+
+async function remove(coll, id) {
+  await fetch(`/api/${coll}/${id}`, { method: 'DELETE' });
+  refresh();
+}
+
+/* ───────────────────────── vue « Moi » ───────────────────────── */
+const CAT_LABEL = { corps: 'Corps', sport: 'Sport', sommeil: 'Sommeil', esprit: 'Esprit', argent: 'Argent', autre: 'Autre' };
+const GOAL_STATUS = { reached: 'atteint', on_track: 'dans les temps', behind: 'en retard', stalled: 'à l\'arrêt', unknown: '' };
+let selectedMetric = null;
+let range = Number(localStorage.getItem('ultron.range')) || 30;
+
+const dayOffset = (key, n) => { const d = new Date(key + 'T12:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const dayGap = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 864e5);
+
+function renderMeHead() {
+  const tr = state.tracking;
+  const goals = tr.metrics.flatMap((m) => m.goals);
+  const ok = goals.filter((g) => g.status === 'on_track' || g.status === 'reached').length;
+  const bad = goals.filter((g) => g.status === 'behind' || g.status === 'stalled').length;
+  const parts = [];
+  if (tr.logStreak.current >= 2) parts.push(`${tr.logStreak.current} jours de suite`);
+  if (ok) parts.push(plural(ok, 'objectif dans les temps', 'objectifs dans les temps'));
+  if (bad) parts.push(`${bad} à la traîne`);
+  let brief = parts.length ? parts.join(', ') + '.' : tr.metrics.length ? 'Le suivi est lancé.' : 'Rien de suivi pour l\'instant.';
+  brief = brief[0].toUpperCase() + brief.slice(1);
+  const missing = tr.missingToday.map((m) => m.label.toLowerCase());
+  const dateLine = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  $('#me-head').replaceChildren(
+    h('p', { class: 'sub', style: 'margin-bottom:10px' }, dateLine[0].toUpperCase() + dateLine.slice(1)),
+    h('p', { class: 'brief' }, brief),
+    tr.metrics.length
+      ? h('p', { class: 'sub', style: 'margin-top:12px' }, missing.length ? `Pas encore saisi aujourd'hui : ${missing.join(', ')}.` : 'Tout ce que tu suis d\'habitude est saisi pour aujourd\'hui.')
+      : h('p', { class: 'empty', style: 'margin-top:12px' }, 'Dis ce que tu veux suivre, Ultron crée la mesure : « aujourd\'hui je pèse 80 kilos, j\'ai dormi 7 heures, couru 3 km et médité ». Puis fixe un cap : « mon objectif, c\'est 75 kilos avant Noël ».'),
+    h('div', { class: 'today-actions' },
+      h('button', { class: 'btn', type: 'button', onclick: () => send('Je fais mon bilan du jour.', true) }, 'Faire mon bilan du jour'),
+      tr.metrics.length ? h('button', { class: 'btn quiet', type: 'button', onclick: () => send('Où j\'en suis sur mes objectifs ?', true) }, 'Demander où j\'en suis') : null));
+}
+
+function renderGoals() {
+  const rows = state.tracking.metrics.flatMap((m) => m.goals.map((g) => ({ m, g })));
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Objectifs'))];
+  if (!rows.length) kids.push(h('p', { class: 'empty' }, 'Aucun objectif. Dis par exemple « je veux atteindre 75 kilos avant Noël » ou « je veux courir 15 km par semaine ». Ultron estime ensuite la date d\'arrivée à ton rythme actuel.'));
+  for (const { m, g } of rows) {
+    const u = m.agg === 'check' ? 'fois' : m.unit;
+    kids.push(h('div', { class: 'goalrow' },
+      h('div', { class: 'g-top' },
+        h('span', { class: 'g-name' }, m.label + (g.kind === 'weekly' ? ', par semaine' : '')),
+        h('span', { class: `g-status ${g.status}` }, GOAL_STATUS[g.status],
+          h('button', { class: 'x', type: 'button', title: 'Retirer cet objectif', 'aria-label': `Retirer l'objectif ${m.label}`, onclick: () => remove('goals', g.id) }, '×'))),
+      h('div', { class: 'g-nums' },
+        h('b', null, g.current != null ? nf.format(g.current) : '–'), ` ${u} `,
+        h('span', null, `sur ${nf.format(g.target)} ${u}${g.deadline ? `, avant le ${shortDate(g.deadline)}` : ''}`)),
+      h('div', { class: 'track', role: 'img', 'aria-label': `${Math.round(g.pct * 100)} % du chemin` }, h('i', { class: g.status, style: `width:${Math.round(g.pct * 100)}%` })),
+      h('p', { class: 'g-text' }, g.text)));
+  }
+  $('#me-goals').replaceChildren(...kids);
+}
+
+function renderRhythm() {
+  const tr = state.tracking;
+  const habits = tr.metrics.filter((m) => m.agg === 'check');
+  const level = (c) => (c >= 4 ? 3 : c >= 2 ? 2 : c >= 1 ? 1 : 0);
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Régularité'),
+    h('span', { class: 'sub' }, tr.logStreak.best ? `${plural(tr.logStreak.current, 'jour', 'jours')} d'affilée, record ${tr.logStreak.best}` : ''))];
+  kids.push(h('div', { class: 'heat', role: 'img', 'aria-label': 'Saisies par jour sur les douze dernières semaines' },
+    tr.activity.map((d) => h('i', { class: d.future ? 'f' : 'l' + level(d.count), title: d.future ? '' : `${shortDate(d.date)} : ${plural(d.count, 'saisie', 'saisies')}` }))));
+  kids.push(h('p', { class: 'sub', style: 'margin-top:8px' }, 'Douze semaines, une colonne par semaine, du lundi au dimanche.'));
+
+  if (habits.length) {
+    const days = [];
+    for (let i = 13; i >= 0; i--) days.push(dayOffset(state.today, -i));
+    kids.push(h('h3', { style: 'margin-top:22px' }, 'Habitudes, 14 derniers jours'));
+    kids.push(h('ul', { class: 'rows' }, habits.map((m) => {
+      const done = new Set(m.points.map((p) => p.date));
+      return h('li', null,
+        h('span', { class: 'name' }, m.label),
+        h('span', { class: 'habit' },
+          h('span', { class: 'dots', role: 'img', 'aria-label': `${days.filter((d) => done.has(d)).length} jours sur 14` }, days.map((d) => h('i', { class: done.has(d) ? 'on' : '', title: shortDate(d) }))),
+          h('span', { class: 'meta' }, m.streak.current ? `série de ${m.streak.current} j` : 'série à relancer')));
+    })));
+  }
+  $('#me-rhythm').replaceChildren(...kids);
+}
+
+/* Grand graphique : uniquement des nombres et des dates formatées, aucune donnée libre. */
+function bigChart(m, goal) {
+  const W = 640, H = 200, L = 44, R = 12, T = 12, B = 24;
+  const from = dayOffset(state.today, -(range - 1));
+  const pts = m.points.filter((p) => p.date >= from);
+  if (!pts.length) return h('p', { class: 'empty' }, `Aucune mesure sur les ${range} derniers jours.`);
+  const bars = m.agg === 'sum';
+  const vals = pts.map((p) => p.value).concat(goal != null && !bars ? [goal] : []);
+  let lo = bars ? 0 : Math.min(...vals), hi = Math.max(...vals);
+  if (hi === lo) { hi += 1; lo -= bars ? 0 : 1; }
+  const padv = (hi - lo) * 0.08; if (!bars) lo -= padv; hi += padv;
+  const x = (date) => L + (dayGap(from, date) / (range - 1)) * (W - L - R);
+  const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  const grid = [lo + (hi - lo) * 0.1, (lo + hi) / 2, hi - (hi - lo) * 0.1];
+  let body = '';
+  for (const g of grid) body += `<line x1="${L}" x2="${W - R}" y1="${y(g).toFixed(1)}" y2="${y(g).toFixed(1)}" stroke="#343A4C" stroke-width="1"/><text x="${L - 8}" y="${(y(g) + 4).toFixed(1)}" text-anchor="end">${nf.format(Math.round(g * 10) / 10)}</text>`;
+  if (goal != null && !bars) body += `<line x1="${L}" x2="${W - R}" y1="${y(goal).toFixed(1)}" y2="${y(goal).toFixed(1)}" stroke="#7ED6B5" stroke-width="1.2" stroke-dasharray="4 5"/><text x="${W - R}" y="${(y(goal) - 6).toFixed(1)}" text-anchor="end" fill="#7ED6B5">objectif ${nf.format(goal)}</text>`;
+  if (bars) {
+    const bw = Math.max(3, Math.min(18, (W - L - R) / range - 2));
+    for (const p of pts) body += `<rect x="${(x(p.date) - bw / 2).toFixed(1)}" y="${y(p.value).toFixed(1)}" width="${bw.toFixed(1)}" height="${(y(0) - y(p.value)).toFixed(1)}" rx="2" fill="#86B4FF"/>`;
+  } else {
+    const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.date).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
+    if (pts.length > 1) body += `<path d="${d}" fill="none" stroke="#ECE8DF" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    for (const p of pts) body += `<circle cx="${x(p.date).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="${pts.length > 45 ? 1.6 : 2.6}" fill="#ECE8DF"/>`;
+    const last = pts[pts.length - 1];
+    body += `<circle cx="${x(last.date).toFixed(1)}" cy="${y(last.value).toFixed(1)}" r="4.5" fill="#FF5A3C"/>`;
+  }
+  body += `<text x="${L}" y="${H - 4}">${shortDate(from)}</text><text x="${W - R}" y="${H - 4}" text-anchor="end">aujourd'hui</text>`;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `<svg class="big" viewBox="0 0 ${W} ${H}" role="img" aria-label="Courbe sur ${range} jours">${body}</svg>`;
+  return wrap.firstElementChild;
+}
+
+function metricDetail(m) {
+  const u = m.unit;
+  const reach = m.goals.find((g) => g.kind === 'reach');
+  const stat = (label, v, suffix = u) => h('div', null, h('span', null, label), h('b', null, v == null ? '–' : `${nf.format(v)}${suffix ? ' ' + suffix : ''}`));
+  const stats = m.agg === 'sum'
+    ? [stat('Cette semaine', m.week), stat('Semaine dernière', m.lastWeek ?? 0), stat('30 derniers jours', m.total30), stat('Meilleur jour', m.max)]
+    : [stat('Moyenne 7 jours', m.avg7), stat('Moyenne 30 jours', m.avg30), stat('Plus bas', m.min), stat('Plus haut', m.max),
+      h('div', null, h('span', null, 'Tendance par semaine'), h('b', null, m.slope == null ? '–' : `${m.slope > 0 ? '+' : '−'}${nf.format(Math.abs(m.slope * 7))}${u ? ' ' + u : ''}`))];
+  return h('div', { class: 'detail' },
+    h('div', { class: 'head' },
+      h('h3', { style: 'margin:0;color:var(--bone);font-size:17px' }, m.label),
+      h('div', { class: 'seg', role: 'group', 'aria-label': 'Période' }, [[30, '30 jours'], [90, '90 jours'], [180, '6 mois']].map(([n, label]) =>
+        h('button', { type: 'button', 'aria-pressed': String(range === n), onclick: () => { range = n; localStorage.setItem('ultron.range', n); renderMetrics(); } }, label)))),
+    bigChart(m, reach?.target),
+    h('div', { class: 'stats' }, stats));
+}
+
+function renderMetrics() {
+  const metrics = state.tracking.metrics.filter((m) => m.agg !== 'check');
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Mesures'), metrics.length ? h('span', { class: 'sub' }, 'Clique sur une mesure pour voir sa courbe.') : null)];
+  if (!metrics.length) kids.push(h('p', { class: 'empty' }, 'Chaque chiffre que tu dictes devient une mesure ici, rangée par thème : corps, sport, sommeil, esprit, argent.'));
+  if (selectedMetric && !metrics.some((m) => m.key === selectedMetric)) selectedMetric = null;
+  for (const cat of Object.keys(CAT_LABEL)) {
+    const list = metrics.filter((m) => m.category === cat);
+    if (!list.length) continue;
+    kids.push(h('h3', { class: 'cat' }, CAT_LABEL[cat]));
+    kids.push(h('div', { class: 'tiles' }, list.map((m) => {
+      const reach = m.goals.find((g) => g.kind === 'reach');
+      const shown = m.agg === 'sum' ? m.week : m.latest?.value;
+      const delta = m.agg === 'last' && m.delta ? `${m.delta > 0 ? '+' : '−'}${nf.format(Math.abs(m.delta))}` : '';
+      return h('button', { class: 'tile', type: 'button', 'aria-expanded': String(selectedMetric === m.key), onclick: () => { selectedMetric = selectedMetric === m.key ? null : m.key; renderMetrics(); } },
+        h('span', { class: 'label' }, h('span', null, m.label + (m.agg === 'sum' ? ', cette semaine' : '')),
+          h('span', null, delta || (m.latest ? shortDate(m.latest.date) : ''))),
+        h('span', { class: 'val' }, shown != null ? nf.format(shown) : '–', h('span', null, m.unit)),
+        sparkline(m.points.slice(-30), reach?.target));
+    })));
+    const sel = list.find((m) => m.key === selectedMetric);
+    if (sel) kids.push(metricDetail(sel));
+  }
+  $('#me-metrics').replaceChildren(...kids);
+}
+
+function renderJournal() {
+  const tr = state.tracking;
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Journal'))];
+  const cols = [];
+  cols.push(h('div', null, h('h3', null, 'Saisi aujourd\'hui'),
+    tr.todayEntries.length ? h('ul', { class: 'rows' }, tr.todayEntries.map((e) => h('li', null,
+      h('span', { class: 'name' }, e.agg === 'check' ? `${e.label} : fait` : `${e.label} : ${nf.format(e.value)} ${e.unit}`),
+      h('button', { class: 'x', type: 'button', onclick: () => remove('entries', e.id) }, 'supprimer'))))
+      : h('p', { class: 'empty' }, 'Rien encore aujourd\'hui.')));
+  cols.push(h('div', null, h('h3', null, 'Notes'),
+    state.notes.length ? h('ul', { class: 'rows' }, state.notes.map((n) => h('li', null,
+      h('span', { class: 'name' }, n.text), h('span', { class: 'meta' }, shortDate(n.date), ' ',
+        h('button', { class: 'x', type: 'button', onclick: () => remove('notes', n.id) }, 'supprimer')))))
+      : h('p', { class: 'empty' }, 'Dicte un ressenti ou un événement : « note que j\'ai mal dormi à cause du café ».')));
+  cols.push(h('div', null, h('h3', null, 'Ce qu\'Ultron retient'),
+    state.memory.length ? h('ul', { class: 'rows' }, state.memory.map((m) => h('li', null,
+      h('span', { class: 'name' }, m.text),
+      h('button', { class: 'x', type: 'button', onclick: () => remove('memory', m.id) }, 'oublier'))))
+      : h('p', { class: 'empty' }, 'Dis « retiens que… » pour qu\'il s\'en souvienne d\'une conversation à l\'autre.')));
+  kids.push(h('div', { class: 'cols' }, cols));
+  $('#me-journal').replaceChildren(...kids);
+}
+
+/* ───────────────────────── vues ───────────────────────── */
+let view = localStorage.getItem('ultron.view') === 'moi' ? 'moi' : 'travail';
+function setView(v) {
+  view = v === 'moi' ? 'moi' : 'travail';
+  localStorage.setItem('ultron.view', view);
+  for (const name of ['travail', 'moi']) {
+    $('#view-' + name).hidden = name !== view;
+    $('#tab-' + name).setAttribute('aria-pressed', String(name === view));
+  }
+}
+$('#tab-travail').addEventListener('click', () => setView('travail'));
+$('#tab-moi').addEventListener('click', () => setView('moi'));
+setView(view);
+
+function render() {
+  renderToday(); renderProjects(); renderSessions();
+  renderMeHead(); renderGoals(); renderRhythm(); renderMetrics(); renderJournal();
+}
+
+/* Une session qui passe de « travaille » à « t'attend » : Ultron le dit sans qu'on demande. */
+function announceSessions() {
+  const fresh = [];
+  for (const s of state.sessions.items) {
+    const before = lastSessionState.get(s.id);
+    if (before === 'working' && s.state === 'waiting') fresh.push(s);
+    lastSessionState.set(s.id, s.state);
+  }
+  if (!fresh.length) return;
+  const names = [...new Set(fresh.map((s) => s.project))];
+  const text = names.length === 1 ? `La session ${names[0]} t'attend.` : `${names.length} sessions t'attendent : ${names.join(', ')}.`;
+  addMsg('info', text);
+  if (!ui.busy && !ui.speaking && !(rec && recMode === 'ptt')) speak(text);
+}
+
+function tick() {
+  const d = new Date();
+  $('#clock').textContent = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+tick(); setInterval(tick, 10_000);
+setCore('idle');
+refresh();
+setInterval(refresh, 10_000);
+if (ui.wake) startRec('wake'); // Chrome redemandera le micro si besoin
+</script>
+</body>
+</html>

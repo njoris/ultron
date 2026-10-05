@@ -1,0 +1,8 @@
+{
+  "name": "ultron",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Tableau de bord personnel piloté à la voix : Trello, sessions Claude Code, suivi perso.",
+  "scripts": { "start": "node server.js", "demo": "node dev/demo.js", "check": "node --check server.js && node --check dev/demo.js && node --check dev/fake-claude.js" },
+  "engines": { "node": ">=20" }
+}

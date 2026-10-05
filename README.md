@@ -69,7 +69,7 @@ Pour un objectif du type « 75 kilos avant Noël », Ultron prolonge la tendance
 
 « Régularité » montre les douze dernières semaines, un carré par jour, plus foncé quand tu as saisi davantage. « Pas encore saisi aujourd'hui » liste ce que tu as relevé au moins trois jours sur les sept derniers.
 
-Clique sur une mesure pour voir sa courbe : son détail te laisse **ajouter ou corriger une valeur à la main**, à n'importe quelle date, sans passer par la voix ni par l'IA. La liste des dernières valeurs t'offre « corriger » et « supprimer ».
+Clique sur une mesure pour voir sa courbe : son détail te laisse **ajouter ou corriger une valeur à la main**, à n'importe quelle date, sans passer par la voix ni par l'IA. La liste des dernières valeurs t'offre « corriger » et « supprimer ». Le bouton « modifier » permet de **renommer la mesure, changer son unité, son thème ou son type**, ou de **la supprimer avec tout son historique** (après confirmation).
 
 ## Comment ça marche
 

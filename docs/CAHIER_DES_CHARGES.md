@@ -53,7 +53,7 @@ Chaque exigence a un état : **fait** (présent dans le code et testé en mode d
 | T2 | Par projet : barre de progression en quatre segments, tickets actifs, liste « À faire » repliable, étiquettes affichées. | fait |
 | T3 | Bandeau « Aujourd'hui » : une phrase de synthèse, puis trois listes (en cours, échéances du jour et en retard, à valider). | fait |
 | T4 | Si Trello est injoignable, afficher l'erreur et garder les dernières données reçues. Si Trello n'est pas configuré, dire quoi mettre dans `.env`. | fait |
-| T5 | Lister les sessions Claude Code actives depuis moins de `SESSION_HOURS` heures : projet, branche, sujet, dernier message, état (travaille, t'attend, en pause). | à valider |
+| T5 | Lister les sessions Claude Code actives depuis moins de `SESSION_HOURS` heures : projet, branche, sujet, dernier message, état (travaille, t'attend, en pause). | fait |
 | T6 | Quand une session passe de « travaille » à « t'attend », l'écrire dans la conversation et le dire à voix haute. | à valider |
 | T7 | Les appels d'Ultron à `claude -p` n'apparaissent jamais dans la liste des sessions. | fait |
 

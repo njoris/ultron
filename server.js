@@ -37,6 +37,7 @@ const CFG = {
   ttsUrl: process.env.ULTRON_TTS_URL || '',  // S4-3 : service de synthèse externe (optionnel), sinon voix du navigateur
   ttsKey: process.env.ULTRON_TTS_KEY || '',
   ttsVoice: process.env.ULTRON_TTS_VOICE || '',
+  usageCmd: process.env.ULTRON_USAGE_CMD || '', // S5-3 : commande qui imprime l'usage de l'abonnement en JSON
 };
 
 const DATA_DIR = process.env.ULTRON_DATA_DIR ? path.resolve(process.env.ULTRON_DATA_DIR) : path.join(ROOT, 'data');
@@ -1003,14 +1004,56 @@ async function chatStream(message, onDelta) {
 
 /* ───────────────────────── HTTP ───────────────────────── */
 
+/* ── S5-3 : usage de l'abonnement, lecture seule, si ULTRON_USAGE_CMD fournit du JSON ── */
+let usageCache = { at: 0, data: null };
+
+// Normalise des formes variées en { available, windows:[{label, percent, resetAt}] }. Pur, testable.
+function normalizeUsage(obj) {
+  if (!obj || typeof obj !== 'object') return { available: false };
+  const out = [];
+  const add = (label, w) => {
+    if (!w || typeof w !== 'object') return;
+    const pctRaw = w.percent ?? w.utilization ?? w.used ?? w.usedPct;
+    let percent = typeof pctRaw === 'number' ? pctRaw : null;
+    if (percent != null && percent <= 1) percent *= 100; // 0..1 → pourcentage
+    if (percent != null) percent = Math.max(0, Math.min(100, Math.round(percent)));
+    out.push({ label, percent, resetAt: w.resetAt ?? w.resets_at ?? w.reset ?? null });
+  };
+  if (Array.isArray(obj.windows)) for (const w of obj.windows) add(w.label || w.name || 'fenêtre', w);
+  else { add('5 heures', obj.five_hour ?? obj.fiveHour ?? obj['5h']); add('7 jours', obj.seven_day ?? obj.sevenDay ?? obj['7d']); }
+  const windows = out.filter((w) => w.percent != null || w.resetAt);
+  return windows.length ? { available: true, windows } : { available: false };
+}
+
+async function getUsage() {
+  if (!CFG.usageCmd) return { available: false };
+  if (usageCache.data && Date.now() - usageCache.at < 30_000) return usageCache.data;
+  const data = await new Promise((resolve) => {
+    let child;
+    try { child = spawn(CFG.usageCmd, { shell: true, env: claudeEnv() }); }
+    catch { return resolve({ available: false, error: 'commande invalide' }); }
+    let out = '';
+    const timer = setTimeout(() => { try { child.kill(); } catch { /* déjà mort */ } resolve({ available: false, error: 'délai dépassé' }); }, 10_000);
+    child.stdout.on('data', (d) => { out += d; });
+    child.on('error', () => { clearTimeout(timer); resolve({ available: false, error: 'commande introuvable' }); });
+    child.on('close', () => {
+      clearTimeout(timer);
+      try { resolve(normalizeUsage(JSON.parse(out))); } catch { resolve({ available: false, error: 'sortie illisible' }); }
+    });
+  });
+  usageCache = { at: Date.now(), data };
+  return data;
+}
+
 async function buildState(force = false) {
-  const [trello, sessions] = await Promise.all([getTrello(force), getSessions()]);
+  const [trello, sessions, usage] = await Promise.all([getTrello(force), getSessions(), getUsage()]);
   return {
     now: new Date().toISOString(),
     today: dayKey(),
     user: CFG.user,
     trello,
     sessions,
+    usage,
     tracking: buildTracking(),
     notes: db.notes.slice(-6).reverse(),
     memory: db.memory.slice().reverse(),
@@ -1278,7 +1321,7 @@ if (require.main === module) start();
 // Exposé pour les tests. __setDb/__getDb donnent accès à l'état en mémoire sans toucher à data/.
 module.exports = {
   listStatus, currentSprint, slopePerDay, streaks, evalGoal, applyActions, parseReply, isLocalRequest,
-  claudeEnv, entriesToCsv, streamEvent, addDays, CFG,
+  claudeEnv, entriesToCsv, streamEvent, normalizeUsage, addDays, CFG,
   __setDb: (next) => { db = next; },
   __getDb: () => db,
 };

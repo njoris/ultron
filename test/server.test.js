@@ -238,6 +238,22 @@ test('applyActions : add_theme crée un thème, réutilisable aussitôt par log_
   assert.ok(applied.some((a) => a.type === 'add_theme'));
 });
 
+/* ───────────── normalizeUsage (S5-3) ───────────── */
+
+test('normalizeUsage normalise les fractions et les formes variées', () => {
+  const a = S.normalizeUsage({ five_hour: { utilization: 0.42, resets_at: '2026-10-05T20:00:00Z' }, seven_day: { used: 73 } });
+  assert.equal(a.available, true);
+  assert.equal(a.windows[0].label, '5 heures');
+  assert.equal(a.windows[0].percent, 42);          // 0,42 → 42 %
+  assert.equal(a.windows[0].resetAt, '2026-10-05T20:00:00Z');
+  assert.equal(a.windows[1].percent, 73);          // 73 reste 73 %
+  const b = S.normalizeUsage({ windows: [{ name: 'Session', percent: 0.9 }] });
+  assert.equal(b.windows[0].label, 'Session');
+  assert.equal(b.windows[0].percent, 90);
+  assert.equal(S.normalizeUsage({}).available, false);
+  assert.equal(S.normalizeUsage(null).available, false);
+});
+
 /* ───────────── streamEvent (S4-2) ───────────── */
 
 test('streamEvent extrait les deltas de texte et le résultat final', () => {

@@ -90,6 +90,7 @@ navigateur (public/index.html)          server.js (127.0.0.1 uniquement)
 ## À savoir
 
 - La reconnaissance vocale de Chrome envoie l'audio aux serveurs de Google. Le reste ne quitte ta machine que pour Trello et Claude.
+- Tes mesures s'exportent en CSV depuis le bouton « Exporter en CSV » du Journal (ou `GET /api/export.csv`). Une copie datée de `data/ultron.json` est faite une fois par jour dans `data/backups/`, les sept dernières étant conservées.
 - La voix est celle du navigateur (`speechSynthesis`). Pour une meilleure voix, c'est la fonction `speak` de `public/index.html` qu'il faut remplacer.
 - Chaque question lance un `claude -p` : compte deux à six secondes de délai, et l'usage est décompté de ton abonnement Claude. Anthropic a annoncé puis suspendu en juin 2026 un passage de `claude -p` sur un crédit séparé ; si ça revient, c'est ici que ça se verra.
 - Testé sous Linux avec un faux Trello et un faux binaire `claude`. Sous Windows, le lancement de la CLI passe par le shell : à vérifier chez toi.

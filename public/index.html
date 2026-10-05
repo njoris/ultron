@@ -221,6 +221,8 @@
   a.export { color: var(--mint); font-size: 13px; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
   a.export:hover { background: var(--steel-700); }
   .proj .sprint { display: inline-block; margin-left: 8px; font-size: 12px; color: var(--mint); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; vertical-align: middle; }
+  .proj-sessions { margin-top: 12px; }
+  .proj-sessions h4 { margin: 0 0 6px; font-size: 13px; color: var(--fog); font-weight: 600; }
 
   @media (max-width: 1180px) { .view { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 820px) {
@@ -750,25 +752,42 @@ function renderProjects() {
           ['done', 'review', 'doing', 'todo'].map((s) => b.counts[s] ? h('i', { class: 's-' + s, style: `flex:${b.counts[s]}` }) : null)) : null,
         active.length ? h('ul', { class: 'tickets' }, active.map((c) => ticket(c))) : null,
         todo.length ? h('details', { open: openDetails.has(id), ontoggle: (e) => e.target.open ? openDetails.add(id) : openDetails.delete(id) },
-          h('summary', null, `À faire (${todo.length})`), h('ul', { class: 'tickets' }, todo.map((c) => ticket(c)))) : null));
+          h('summary', null, `À faire (${todo.length})`), h('ul', { class: 'tickets' }, todo.map((c) => ticket(c)))) : null,
+        (() => { const linked = (state.sessions.items || []).filter((x) => normName(x.project) === normName(b.name));
+          return linked.length ? h('div', { class: 'proj-sessions' }, h('h4', null, linked.length > 1 ? 'Sessions Claude Code' : 'Session Claude Code'), linked.map(sessCard)) : null; })()));
     }
   }
   $('#projects').replaceChildren(...kids);
 }
 
 const STATE_LABEL = { working: 'travaille', waiting: 't\'attend', idle: 'en pause' };
-function renderSessions() {
-  const s = state.sessions;
-  const kids = [h('div', { class: 'head' }, h('h2', null, 'Sessions Claude Code'))];
-  if (!s.found) kids.push(h('p', { class: 'empty' }, 'Aucun dossier Claude Code trouvé sur cette machine. Dès que tu lances ', h('code', null, 'claude'), ' dans un projet, la session apparaît ici.'));
-  else if (!s.items.length) kids.push(h('p', { class: 'empty' }, 'Aucune session ces trois derniers jours.'));
-  else kids.push(h('div', null, s.items.map((x) => h('div', { class: 'sess' },
+// Nom comparable (minuscules, sans accents ni ponctuation) pour relier une session à un tableau.
+const normName = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+// Le tableau Trello dont le nom correspond au dossier de la session, s'il existe.
+function sessionBoard(x) {
+  const boards = state.trello && state.trello.boards;
+  if (!boards || !x.project) return null;
+  const p = normName(x.project);
+  return boards.find((b) => normName(b.name) === p) || null;
+}
+function sessCard(x) {
+  return h('div', { class: 'sess' },
     h('div', { class: 'top' },
       h('span', { class: 'who' }, x.project, x.branch ? h('small', null, x.branch) : null),
       h('span', { class: `state ${x.state}` }, `${STATE_LABEL[x.state]}, ${ago(x.updatedAt)}`)),
     h('p', { class: 'title' }, x.title),
     x.pending ? h('p', { class: 'pending' }, x.pending) : null,
-    x.lastReply ? h('p', null, x.lastReply) : null))));
+    x.lastReply ? h('p', null, x.lastReply) : null);
+}
+
+function renderSessions() {
+  const s = state.sessions;
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Sessions Claude Code'))];
+  const unlinked = (s.items || []).filter((x) => !sessionBoard(x)); // les autres sont montrées sous leur projet
+  if (!s.found) kids.push(h('p', { class: 'empty' }, 'Aucun dossier Claude Code trouvé sur cette machine. Dès que tu lances ', h('code', null, 'claude'), ' dans un projet, la session apparaît ici.'));
+  else if (!s.items.length) kids.push(h('p', { class: 'empty' }, 'Aucune session ces trois derniers jours.'));
+  else if (!unlinked.length) kids.push(h('p', { class: 'empty' }, 'Toutes les sessions récentes sont rattachées à un projet ci-dessus.'));
+  else kids.push(h('div', null, unlinked.map(sessCard)));
   $('#sessions').replaceChildren(...kids);
 }
 

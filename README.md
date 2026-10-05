@@ -83,7 +83,7 @@ navigateur (public/index.html)          server.js (127.0.0.1 uniquement)
 ```
 
 - **Trello** : API REST, mise en cache une minute.
-- **Sessions Claude Code** : lecture des fichiers `~/.claude/projects/*/*.jsonl`. L'état est déduit du dernier message : si Claude a fini son tour, la session t'attend ; si un outil est en suspens depuis plus de deux minutes, c'est probablement une demande d'autorisation. C'est une déduction, pas une information donnée par la CLI.
+- **Sessions Claude Code** : lecture des fichiers `~/.claude/projects/*/*.jsonl`. L'état est déduit du dernier message : si Claude a fini son tour, la session t'attend ; si un outil est en suspens depuis plus de deux minutes, c'est probablement une demande d'autorisation. C'est une déduction, pas une information donnée par la CLI. Une session dont le dossier porte le nom d'un tableau Trello est affichée sous ce projet ; les autres restent dans la liste « Sessions Claude Code ».
 - **Suivi** : tout est dans `data/ultron.json` (mesures, objectifs, notes, mémoire, conversation). L'IA ne touche pas au fichier : elle renvoie des actions (`log_metric`, `set_goal`, `add_note`, `remember`…) que le serveur valide puis applique. Les moyennes, tendances et dates estimées sont calculées par le serveur (`buildTracking` et `evalGoal` dans `server.js`), puis données à l'IA déjà faites : elle les lit, elle ne les recalcule pas.
 - **IA** : `claude -p` sans aucun outil, sans serveurs MCP, sans enregistrement de session, lancé dans un dossier vide. Les variables `ANTHROPIC_*` sont retirées de son environnement pour qu'une clé API qui traînerait ne détourne pas la facturation vers l'API.
 

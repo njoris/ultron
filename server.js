@@ -395,7 +395,9 @@ function evalGoal(goal, m, today) {
     };
   }
   const points = m.points;
-  const current = points.length ? points[points.length - 1].value : null;
+  const lastValue = points.length ? points[points.length - 1].value : null;
+  // Réglage par mesure : lisser la progression sur la moyenne 7 jours plutôt que sur la dernière valeur.
+  const current = m.smooth && m.agg === 'last' && m.avg7 != null ? m.avg7 : lastValue;
   if (current == null) return { current: null, pct: 0, reached: false, status: 'unknown', text: 'Aucune mesure pour l\'instant.' };
   const start = goal.start ?? points.find((p) => p.date >= goal.createdAt.slice(0, 10))?.value ?? current;
   const down = goal.target < start;
@@ -439,6 +441,7 @@ function buildTracking() {
     const m = {
       key,
       label: def.label, unit: def.unit, agg: def.agg, category: CATEGORIES.includes(def.category) ? def.category : 'autre',
+      smooth: !!def.smooth,
       points,
       latest,
       delta: latest && prev ? latest.value - prev.value : null,
@@ -899,6 +902,7 @@ const server = http.createServer(async (req, res) => {
       if (typeof body.unit === 'string') def.unit = clip(body.unit.trim(), 12);
       if (CATEGORIES.includes(body.category)) def.category = body.category;
       if (['last', 'sum', 'check'].includes(body.agg)) def.agg = body.agg;
+      if (typeof body.smooth === 'boolean') def.smooth = body.smooth;
       saveDb();
       return sendJson(res, 200, { ok: true });
     }

@@ -214,6 +214,8 @@
   .entry-edit .save:hover { background: var(--line); }
   .entry-edit .danger { background: none; border: 1px solid var(--ember); border-radius: 6px; color: var(--ember); padding: 7px 14px; font-size: 14px; cursor: pointer; }
   .entry-edit .danger:hover { background: var(--ember); color: var(--steel-900); }
+  .entry-edit .check { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; color: var(--fog); font-size: 13px; }
+  .entry-edit .check input { width: auto; margin-top: 2px; }
   .entry-list { margin-top: 12px; }
   .entry-list .rows li.editing { outline: 1px solid var(--mint); outline-offset: 3px; border-radius: 4px; }
 
@@ -788,11 +790,13 @@ async function remove(coll, id) {
 
 // Modifie une mesure (libellé, unité, thème, type), sans passer par l'IA.
 async function saveMetric(key) {
+  const smoothEl = $('#ms-smooth');
   const payload = {
     label: $('#ms-label').value,
     unit: $('#ms-unit').value,
     category: $('#ms-cat').value,
     agg: $('#ms-agg').value,
+    ...(smoothEl ? { smooth: smoothEl.checked } : {}),
   };
   metricFormFocused = false;
   const res = await fetch(`/api/metrics/${key}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -989,6 +993,9 @@ function metricDetail(m) {
       h('select', { id: 'ms-agg', 'aria-label': 'Type', onfocus: onf, onblur: onb },
         Object.keys(AGG_LABEL).map((a) => h('option', { value: a, selected: a === m.agg ? true : null }, AGG_LABEL[a]))),
       h('button', { type: 'button', class: 'save', onclick: () => saveMetric(m.key) }, 'Enregistrer')),
+    m.agg === 'last' ? h('label', { class: 'check' },
+      h('input', { id: 'ms-smooth', type: 'checkbox', checked: m.smooth ? true : null, onfocus: onf, onblur: onb }),
+      ' Pour les objectifs, lisser la progression sur la moyenne des 7 derniers jours (au lieu de la dernière valeur).') : null,
     h('div', { class: 'row', style: 'margin-top:10px' },
       h('button', { type: 'button', class: 'danger', onclick: () => deleteMetric(m.key, m.label) }, 'Supprimer la mesure et son historique')));
   return h('div', { class: 'detail' },

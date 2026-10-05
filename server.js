@@ -41,8 +41,6 @@ const AI_CWD = path.join(DATA_DIR, 'ai-cwd'); // dossier vide : aucun CLAUDE.md 
 const SYS_FILE = path.join(DATA_DIR, 'system-prompt.txt');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 
-fs.mkdirSync(AI_CWD, { recursive: true });
-
 /* ───────────────────────── utilitaires ───────────────────────── */
 
 function loadEnv(file) {
@@ -518,8 +516,6 @@ Règles pour les actions :
 - Si une valeur est ambiguë ou manifestement mal transcrite par la reconnaissance vocale (« je pèse 800 kilos »), n'enregistre rien et demande confirmation.
 - Quand tu enregistres, confirme en une phrase avec les valeurs, et ajoute si c'est pertinent où il en est par rapport à son objectif ou à la mesure précédente.`;
 
-fs.writeFileSync(SYS_FILE, SYSTEM_PROMPT);
-
 function buildContext(state) {
   const now = new Date();
   const out = [];
@@ -880,17 +876,33 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-loadDb();
-server.on('error', (e) => {
-  console.error(e.code === 'EADDRINUSE'
-    ? `Le port ${CFG.port} est déjà pris. Change PORT dans .env ou ferme l'autre Ultron.`
-    : `Le serveur n'a pas pu démarrer : ${e.message}`);
-  process.exit(1);
-});
-server.listen(CFG.port, '127.0.0.1', () => {
-  console.log(`\n  Ultron est en ligne → http://localhost:${CFG.port}\n`);
-  console.log(`  Trello        ${CFG.trelloKey && CFG.trelloToken ? 'configuré' : 'non configuré (voir .env.example)'}`);
-  console.log(`  Claude Code   ${path.join(CFG.claudeHome, 'projects')}`);
-  console.log(`  Modèle        ${CFG.claudeModel || 'celui par défaut de ton compte'}`);
-  console.log(`  Données       ${DATA_FILE}\n`);
-});
+function start() {
+  // Effets de bord réservés à l'exécution : on ne les déclenche pas à l'import (tests).
+  fs.mkdirSync(AI_CWD, { recursive: true }); // dossier vide pour la CLI, aucun CLAUDE.md chargé
+  fs.writeFileSync(SYS_FILE, SYSTEM_PROMPT);
+  loadDb();
+  server.on('error', (e) => {
+    console.error(e.code === 'EADDRINUSE'
+      ? `Le port ${CFG.port} est déjà pris. Change PORT dans .env ou ferme l'autre Ultron.`
+      : `Le serveur n'a pas pu démarrer : ${e.message}`);
+    process.exit(1);
+  });
+  server.listen(CFG.port, '127.0.0.1', () => {
+    console.log(`\n  Ultron est en ligne → http://localhost:${CFG.port}\n`);
+    console.log(`  Trello        ${CFG.trelloKey && CFG.trelloToken ? 'configuré' : 'non configuré (voir .env.example)'}`);
+    console.log(`  Claude Code   ${path.join(CFG.claudeHome, 'projects')}`);
+    console.log(`  Modèle        ${CFG.claudeModel || 'celui par défaut de ton compte'}`);
+    console.log(`  Données       ${DATA_FILE}\n`);
+  });
+}
+
+// Exécution directe (node server.js) → on démarre. Import (node:test) → on n'expose que les fonctions.
+if (require.main === module) start();
+
+// Exposé pour les tests. __setDb/__getDb donnent accès à l'état en mémoire sans toucher à data/.
+module.exports = {
+  listStatus, slopePerDay, streaks, evalGoal, applyActions, parseReply, isLocalRequest,
+  addDays, CFG,
+  __setDb: (next) => { db = next; },
+  __getDb: () => db,
+};

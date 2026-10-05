@@ -34,6 +34,9 @@ const CFG = {
   sessionHours: Number(process.env.SESSION_HOURS) || 72,
   useApiKey: process.env.ULTRON_USE_API_KEY === '1',
   stream: process.env.ULTRON_STREAM === '1', // S4 : process claude persistant + réponse en flux (opt-in)
+  ttsUrl: process.env.ULTRON_TTS_URL || '',  // S4-3 : service de synthèse externe (optionnel), sinon voix du navigateur
+  ttsKey: process.env.ULTRON_TTS_KEY || '',
+  ttsVoice: process.env.ULTRON_TTS_VOICE || '',
 };
 
 const DATA_DIR = process.env.ULTRON_DATA_DIR ? path.resolve(process.env.ULTRON_DATA_DIR) : path.join(ROOT, 'data');
@@ -1012,7 +1015,7 @@ async function buildState(force = false) {
     notes: db.notes.slice(-6).reverse(),
     memory: db.memory.slice().reverse(),
     chat: db.chat.slice(-30),
-    ai: { model: CFG.claudeModel || null, lastError: aiLastError, stream: CFG.stream },
+    ai: { model: CFG.claudeModel || null, lastError: aiLastError, stream: CFG.stream, tts: !!CFG.ttsUrl },
   };
 }
 
@@ -1098,6 +1101,26 @@ const server = http.createServer(async (req, res) => {
         res.end();
       }
       return;
+    }
+
+    // Synthèse vocale externe (S4-3), optionnelle. Sans ULTRON_TTS_URL : 204, l'interface garde la voix du navigateur.
+    if (route === 'POST /api/tts') {
+      if (!CFG.ttsUrl) { res.writeHead(204); return res.end(); }
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      let text = '';
+      try { text = String(JSON.parse(await readBody(req)).text || '').slice(0, 2000); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      if (!text.trim()) return sendJson(res, 400, { error: 'Texte vide.' });
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (CFG.ttsKey) headers.Authorization = `Bearer ${CFG.ttsKey}`;
+        const up = await fetch(CFG.ttsUrl, { method: 'POST', headers, body: JSON.stringify({ text, voice: CFG.ttsVoice || undefined }), signal: AbortSignal.timeout(15000) });
+        if (!up.ok) return sendJson(res, 502, { error: `Service de voix : ${up.status}` });
+        const buf = Buffer.from(await up.arrayBuffer());
+        res.writeHead(200, { 'Content-Type': up.headers.get('content-type') || 'audio/mpeg', 'Cache-Control': 'no-store' });
+        return res.end(buf);
+      } catch (e) {
+        return sendJson(res, 502, { error: `Service de voix injoignable : ${e.message}` });
+      }
     }
 
     // Saisie manuelle d'une valeur, à n'importe quelle date, sans passer par l'IA.

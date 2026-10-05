@@ -576,9 +576,16 @@ function pickVoice() {
   const voices = speechSynthesis.getVoices().filter((v) => v.lang?.toLowerCase().startsWith('fr'));
   return voices.find((v) => /google|natural|premium|enhanced|thomas|daniel/i.test(v.name)) || voices.find((v) => v.lang === 'fr-FR') || voices[0] || null;
 }
+let ttsAudio = null; // lecture audio de la voix externe en cours
 function speak(text, done) {
   const finish = () => { ui.speaking = false; setCore('idle'); resumeWake(); done?.(); };
-  if (!ui.speakOn || !('speechSynthesis' in window) || !text) return finish();
+  if (!ui.speakOn || !text) return finish();
+  // S4-3 : si une voix externe est configurée côté serveur, on l'essaie d'abord, repli navigateur sinon.
+  if (state && state.ai && state.ai.tts) return speakExternal(text, finish, () => speakBrowser(text, finish));
+  speakBrowser(text, finish);
+}
+function speakBrowser(text, finish) {
+  if (!('speechSynthesis' in window)) return finish();
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'fr-FR';
@@ -591,8 +598,22 @@ function speak(text, done) {
   u.onerror = finish;
   speechSynthesis.speak(u);
 }
+function speakExternal(text, finish, fallback) {
+  fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
+    .then((r) => { if (r.status === 204 || !r.ok) throw new Error('voix externe indisponible'); return r.blob(); })
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = new Audio(url); ttsAudio = a;
+      ui.speaking = true; stopRec(true); setCore('speaking', '');
+      const end = () => { URL.revokeObjectURL(url); if (ttsAudio === a) ttsAudio = null; finish(); };
+      a.onended = end; a.onerror = end;
+      a.play().catch(() => { URL.revokeObjectURL(url); if (ttsAudio === a) ttsAudio = null; fallback(); });
+    })
+    .catch(() => fallback());
+}
 function stopSpeaking() {
   if ('speechSynthesis' in window && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel();
+  if (ttsAudio) { try { ttsAudio.pause(); } catch (e) { /* déjà arrêté */ } ttsAudio = null; }
   ui.speaking = false;
 }
 if ('speechSynthesis' in window) speechSynthesis.getVoices(); // déclenche le chargement des voix

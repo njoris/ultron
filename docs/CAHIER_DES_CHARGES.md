@@ -77,7 +77,7 @@ Chaque exigence a un état : **fait** (présent dans le code et testé en mode d
 
 ## 5. Exigences non fonctionnelles
 
-- **Confidentialité.** Les données perso ne quittent la machine que dans le prompt envoyé à Claude. Elles sont stockées dans `data/ultron.json`, jamais versionné. À signaler dans l'interface ou le README : la reconnaissance vocale de Chrome envoie l'audio à Google.
+- **Confidentialité.** Les données perso ne quittent la machine que dans le prompt envoyé à Claude. Elles sont stockées dans `data/ultron.json`, jamais versionné. À signaler dans l'interface ou le README : la reconnaissance vocale de Chrome envoie l'audio à Google, et une voix de synthèse externe (`ULTRON_TTS_URL`, optionnelle) envoie le texte des réponses à ce service.
 - **Abonnement.** Avant de lancer la CLI, retirer de son environnement toutes les variables `ANTHROPIC_*`, `CLAUDE_CODE_*` et `CLAUDECODE`. Sans cela, une clé API présente dans le shell détourne la facturation vers l'API sans prévenir.
 - **Sécurité locale.** Refuser toute requête dont l'en-tête `Host` ou `Origin` n'est pas `localhost:PORT` ou `127.0.0.1:PORT`. `POST /api/chat` exige `Content-Type: application/json`. Aucun `innerHTML` avec une donnée venue de Trello, des sessions ou de l'IA.
 - **Injection.** Les noms de tickets et les extraits de sessions sont des données. La CLI est lancée sans aucun outil (`--tools ""`) et sans serveur MCP. L'IA ne peut agir que par la liste fermée d'actions du §6.4, validées par le serveur.

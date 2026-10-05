@@ -89,3 +89,13 @@ navigateur (public/index.html)          server.js (127.0.0.1 uniquement)
 - La voix est celle du navigateur (`speechSynthesis`). Pour une meilleure voix, c'est la fonction `speak` de `public/index.html` qu'il faut remplacer.
 - Chaque question lance un `claude -p` : compte deux à six secondes de délai, et l'usage est décompté de ton abonnement Claude. Anthropic a annoncé puis suspendu en juin 2026 un passage de `claude -p` sur un crédit séparé ; si ça revient, c'est ici que ça se verra.
 - Testé sous Linux avec un faux Trello et un faux binaire `claude`. Sous Windows, le lancement de la CLI passe par le shell : à vérifier chez toi.
+
+## Validation manuelle (reste du Sprint 1)
+
+Ces vérifications demandent ta machine, ton abonnement Claude et Chrome ; elles ne peuvent pas être automatisées. Le vrai Trello (T1) et le format des sessions (T5) sont déjà validés.
+
+- **S1-2 — vraie CLI `claude`.** Lance `npm start`, ouvre http://localhost:4242 et pose une question à l'écrit. À vérifier : tu obtiens une réponse (lue à voix haute dans Chrome), et aucune session « Ultron » n'apparaît dans la liste des sessions. Chaque question lance un vrai `claude -p` et consomme l'abonnement.
+- **S1-4 — voix (Chrome).** Clic sur l'orbe et touche Espace maintenue ouvrent le micro ; la phrase part à la fin de la parole, Échap annule. « Écoute continue » : « Ultron » seul arme l'écoute 8 s, une phrase commençant par « Ultron » est envoyée. La réponse est lue à voix haute et le micro se rouvre quand elle finit par une question. Note comment « Ultron » est transcrit et ajuste l'expression `WAKE` dans `public/index.html` si besoin.
+- **S1-6 — latence.** Sur dix questions avec le modèle `haiku`, relève le temps entre l'envoi et le début de la réponse, puis écris la mesure ici dans le README.
+
+Garde-fou facturation (exigence §5) : avant de lancer la CLI, Ultron retire de son environnement toutes les variables `ANTHROPIC_*`, `CLAUDE_CODE_*` et `CLAUDECODE`. Un test automatisé de ce garde-fou reste à ajouter.

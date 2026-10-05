@@ -37,6 +37,7 @@ const CFG = {
 
 const DATA_DIR = process.env.ULTRON_DATA_DIR ? path.resolve(process.env.ULTRON_DATA_DIR) : path.join(ROOT, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'ultron.json');
+const BACKUP_DIR = path.join(DATA_DIR, 'backups'); // copies datées de ultron.json (7 gardées)
 const AI_CWD = path.join(DATA_DIR, 'ai-cwd'); // dossier vide : aucun CLAUDE.md n'est chargé
 const SYS_FILE = path.join(DATA_DIR, 'system-prompt.txt');
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -99,6 +100,34 @@ function saveDb() {
   const tmp = DATA_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
   fs.renameSync(tmp, DATA_FILE);
+  backupDb();
+}
+
+// Copie datée de ultron.json, une fois par jour, sept copies gardées. Ne jette jamais : une sauvegarde
+// ratée ne doit pas bloquer l'enregistrement.
+function backupDb() {
+  try {
+    if (!fs.existsSync(DATA_FILE)) return;
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const dest = path.join(BACKUP_DIR, `ultron-${dayKey()}.json`);
+    if (!fs.existsSync(dest)) fs.copyFileSync(DATA_FILE, dest);
+    const files = fs.readdirSync(BACKUP_DIR).filter((f) => /^ultron-\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
+    for (const f of files.slice(0, -7)) fs.unlinkSync(path.join(BACKUP_DIR, f)); // on ne garde que les 7 plus récentes
+  } catch (e) {
+    console.error(`Sauvegarde impossible : ${e.message}`);
+  }
+}
+
+// Export CSV des mesures. Fonction pure (testable) : une ligne d'en-tête puis une ligne par entrée.
+function entriesToCsv(database) {
+  const esc = (v) => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const rows = [['date', 'cle', 'mesure', 'valeur', 'unite', 'note', 'type', 'theme']];
+  const entries = database.entries.slice().sort((a, b) => a.date.localeCompare(b.date) || String(a.ts).localeCompare(String(b.ts)));
+  for (const e of entries) {
+    const m = database.metrics[e.key] || {};
+    rows.push([e.date, e.key, m.label || e.key, e.value, m.unit || '', e.note || '', m.agg || '', m.category || '']);
+  }
+  return '﻿' + rows.map((r) => r.map(esc).join(',')).join('\r\n'); // BOM : Excel ouvre en UTF-8
 }
 
 /* ───────────────────────── Trello ───────────────────────── */
@@ -977,6 +1006,16 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true });
     }
 
+    // Export CSV de toutes les mesures.
+    if (req.method === 'GET' && url.pathname === '/api/export.csv') {
+      res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="ultron-${dayKey()}.csv"`,
+        'Cache-Control': 'no-store',
+      });
+      return res.end(entriesToCsv(db));
+    }
+
     if (req.method === 'GET') {
       const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
       const file = path.resolve(PUBLIC_DIR, rel);
@@ -1003,6 +1042,7 @@ function start() {
   fs.mkdirSync(AI_CWD, { recursive: true }); // dossier vide pour la CLI, aucun CLAUDE.md chargé
   fs.writeFileSync(SYS_FILE, SYSTEM_PROMPT);
   loadDb();
+  backupDb(); // une copie datée au démarrage
   server.on('error', (e) => {
     console.error(e.code === 'EADDRINUSE'
       ? `Le port ${CFG.port} est déjà pris. Change PORT dans .env ou ferme l'autre Ultron.`
@@ -1024,7 +1064,7 @@ if (require.main === module) start();
 // Exposé pour les tests. __setDb/__getDb donnent accès à l'état en mémoire sans toucher à data/.
 module.exports = {
   listStatus, slopePerDay, streaks, evalGoal, applyActions, parseReply, isLocalRequest,
-  claudeEnv, addDays, CFG,
+  claudeEnv, entriesToCsv, addDays, CFG,
   __setDb: (next) => { db = next; },
   __getDb: () => db,
 };

@@ -218,6 +218,8 @@
   .entry-edit .check input { width: auto; margin-top: 2px; }
   .entry-list { margin-top: 12px; }
   .entry-list .rows li.editing { outline: 1px solid var(--mint); outline-offset: 3px; border-radius: 4px; }
+  a.export { color: var(--mint); font-size: 13px; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+  a.export:hover { background: var(--steel-700); }
 
   @media (max-width: 1180px) { .view { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 820px) {
@@ -1112,7 +1114,8 @@ function renderWeek() {
 
 function renderJournal() {
   const tr = state.tracking;
-  const kids = [h('div', { class: 'head' }, h('h2', null, 'Journal'))];
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Journal'),
+    h('a', { class: 'export', href: '/api/export.csv', download: 'ultron.csv' }, 'Exporter en CSV'))];
   const cols = [];
   cols.push(h('div', null, h('h3', null, 'Saisi aujourd\'hui'),
     tr.todayEntries.length ? h('ul', { class: 'rows' }, tr.todayEntries.map((e) => h('li', null,

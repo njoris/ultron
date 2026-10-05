@@ -215,6 +215,21 @@ test('applyActions : add_theme crée un thème, réutilisable aussitôt par log_
   assert.ok(applied.some((a) => a.type === 'add_theme'));
 });
 
+/* ───────────── entriesToCsv (S2-6) ───────────── */
+
+test('entriesToCsv produit un CSV avec en-tête, BOM et échappement des notes', () => {
+  const db = {
+    metrics: { poids: { label: 'Poids', unit: 'kg', agg: 'last', category: 'corps' } },
+    entries: [{ id: '1', key: 'poids', value: 80, date: '2026-10-01', note: 'après, "sport"', ts: '2026-10-01T08:00:00Z' }],
+  };
+  const csv = S.entriesToCsv(db);
+  assert.ok(csv.startsWith('﻿'), 'commence par un BOM UTF-8');
+  const lines = csv.slice(1).split('\r\n');
+  assert.equal(lines[0], 'date,cle,mesure,valeur,unite,note,type,theme');
+  assert.ok(lines[1].startsWith('2026-10-01,poids,Poids,80,kg,'));
+  assert.ok(lines[1].includes('"après, ""sport"""'), 'la note à virgule/guillemets est échappée');
+});
+
 /* ───────────── isLocalRequest ───────────── */
 
 test('isLocalRequest n’accepte que l’hôte local attendu', () => {

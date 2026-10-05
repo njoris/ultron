@@ -247,6 +247,7 @@
     <div class="toggles">
       <label><input type="checkbox" id="wake"> Écoute continue</label>
       <label><input type="checkbox" id="speak"> Réponses à voix haute</label>
+      <label>Rappel du soir <input type="time" id="reminder"></label>
     </div>
   </aside>
 
@@ -658,6 +659,7 @@ async function refresh(force) {
     state = await res.json();
     render();
     announceSessions();
+    checkReminder();
     if (firstLoad) {
       firstLoad = false;
       for (const m of state.chat) addMsg(m.role === 'user' ? 'me' : 'ultron', m.text, m.applied);
@@ -1172,6 +1174,31 @@ function announceSessions() {
   addMsg('info', text);
   if (!ui.busy && !ui.speaking && !(rec && recMode === 'ptt')) speak(text);
 }
+
+/* Rappel du soir : à l'heure réglée, si des mesures manquent, Ultron le dit une seule fois dans la journée. */
+function checkReminder() {
+  const at = localStorage.getItem('ultron.reminder');
+  if (!at || !state || !state.tracking) return;
+  const now = new Date();
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  if (hhmm < at) return;                                             // pas encore l'heure
+  if (localStorage.getItem('ultron.reminderDone') === state.today) return; // déjà dit aujourd'hui
+  const missing = state.tracking.missingToday || [];
+  if (!missing.length) return;                                       // rien ne manque : on se tait
+  localStorage.setItem('ultron.reminderDone', state.today);
+  const text = `Petit rappel du soir : tu n'as pas encore noté ${missing.map((m) => m.label).join(', ')} aujourd'hui.`;
+  addMsg('info', text);
+  if (!ui.busy && !ui.speaking && !(rec && recMode === 'ptt')) speak(text);
+}
+
+// Réglage de l'heure du rappel (vide = désactivé). Défaut : 21h00.
+(() => {
+  const el = $('#reminder');
+  let v = localStorage.getItem('ultron.reminder');
+  if (v == null) { v = '21:00'; localStorage.setItem('ultron.reminder', v); }
+  el.value = v;
+  el.addEventListener('change', () => localStorage.setItem('ultron.reminder', el.value));
+})();
 
 function tick() {
   const d = new Date();

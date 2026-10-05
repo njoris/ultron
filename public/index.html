@@ -229,6 +229,9 @@
   .usage .track { height: 6px; background: var(--steel-600); border-radius: 3px; margin-top: 5px; overflow: hidden; }
   .usage .track i { display: block; height: 100%; background: var(--mint); }
   .usage .sub { font-size: 12px; color: var(--fog); }
+  .task-done { color: var(--mint); }
+  .task-error { color: var(--ember); }
+  .task-running { color: var(--fog); }
 
   @media (max-width: 1180px) { .view { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 820px) {
@@ -269,6 +272,7 @@
       <section class="today wide" id="today"></section>
       <section id="projects"></section>
       <section id="sessions"></section>
+      <section id="tasks"></section>
       <section id="usage"></section>
     </div>
     <div class="view" id="view-moi" hidden>
@@ -754,6 +758,7 @@ async function refresh(force) {
     state = await res.json();
     render();
     announceSessions();
+    announceTasks();
     checkReminder();
     if (firstLoad) {
       firstLoad = false;
@@ -870,6 +875,21 @@ function sessCard(x) {
     h('p', { class: 'title' }, x.title),
     x.pending ? h('p', { class: 'pending' }, x.pending) : null,
     x.lastReply ? h('p', null, x.lastReply) : null);
+}
+
+// S5-1/S5-2 : tâches Claude Code lancées par Ultron.
+const TASK_LABEL = { running: 'en cours', done: 'terminée', error: 'échec' };
+function fmtDur(ms) { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s} s` : `${Math.round(s / 60)} min`; }
+function renderTasks() {
+  const list = state.tasks || [];
+  const kids = [];
+  if (list.length) {
+    kids.push(h('div', { class: 'head' }, h('h2', null, 'Tâches lancées')));
+    kids.push(h('ul', { class: 'rows' }, list.map((t) => h('li', null,
+      h('span', { class: 'name' }, `${t.project} — ${t.prompt}`),
+      h('span', { class: `meta task-${t.state}` }, `${TASK_LABEL[t.state] || t.state} · ${fmtDur(t.durationMs)}`)))));
+  }
+  $('#tasks').replaceChildren(...kids); // rien tant qu'aucune tâche
 }
 
 // S5-3 : usage de l'abonnement, affiché seulement si le serveur a pu le lire (ULTRON_USAGE_CMD).
@@ -1281,7 +1301,7 @@ $('#tab-moi').addEventListener('click', () => setView('moi'));
 setView(view);
 
 function render() {
-  renderToday(); renderProjects(); renderSessions(); renderUsage();
+  renderToday(); renderProjects(); renderSessions(); renderTasks(); renderUsage();
   syncThemes();
   renderMeHead(); renderWeek(); renderGoals(); renderRhythm();
   if (!metricFormFocused) renderMetrics(); // on ne reconstruit pas le détail pendant une saisie
@@ -1327,6 +1347,20 @@ function checkReminder() {
   el.value = v;
   el.addEventListener('change', () => localStorage.setItem('ultron.reminder', el.value));
 })();
+
+// S5-2 : alerte parlée quand une tâche lancée se termine ou échoue.
+const lastTaskState = new Map();
+function announceTasks() {
+  for (const t of (state.tasks || [])) {
+    const before = lastTaskState.get(t.id);
+    if (before === 'running' && (t.state === 'done' || t.state === 'error')) {
+      const msg = t.state === 'done' ? `La tâche sur ${t.project} est terminée.` : `La tâche sur ${t.project} a échoué.`;
+      addMsg('info', msg);
+      if (!ui.busy && !ui.speaking && !(rec && recMode === 'ptt')) speak(msg);
+    }
+    lastTaskState.set(t.id, t.state);
+  }
+}
 
 function tick() {
   const d = new Date();

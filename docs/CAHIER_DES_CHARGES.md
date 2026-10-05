@@ -27,7 +27,9 @@ La référence d'inspiration est le projet `ethanplusai/jarvis` (une voix pour C
 
 Dans le périmètre : lecture de Trello, écriture limitée dans Trello (déplacer ou créer un ticket, sur confirmation orale), lecture des sessions Claude Code, conversation voix et texte, suivi perso (mesures, habitudes, objectifs, notes, mémoire), alertes parlées.
 
-Hors périmètre pour l'instant, et à ne pas commencer sans demande explicite : piloter ou lancer des sessions Claude Code, application mobile, synchronisation cloud, intégrations santé (montre, balance connectée), agenda et e-mail.
+Lancer de vraies tâches Claude Code dans un dépôt est possible mais **désactivé par défaut** (`ULTRON_AGENT=1`, confirmation orale) : c'est le mode « acteur », à activer en connaissance de cause.
+
+Hors périmètre pour l'instant, et à ne pas commencer sans demande explicite : application mobile, synchronisation cloud, intégrations santé (montre, balance connectée), agenda et e-mail.
 
 ## 4. Exigences fonctionnelles
 
@@ -142,7 +144,7 @@ Le prompt contient `<contexte>` (date, Trello, sessions, suivi, mémoire, notes)
 { "say": "ce qu'Ultron dit à voix haute", "actions": [] }
 ```
 
-Actions acceptées, toute autre étant ignorée : `log_metric`, `set_goal`, `add_note`, `delete_entry`, `remember`, `forget`, `show_view`, `add_theme`, `trello_move`, `trello_create`. Les deux dernières écrivent dans Trello (après confirmation orale, et avec un jeton ayant le droit d'écriture). Le détail des champs est dans `SYSTEM_PROMPT` (`server.js`), qui fait foi. Une réponse qui n'est pas du JSON est dite telle quelle, sans action.
+Actions acceptées, toute autre étant ignorée : `log_metric`, `set_goal`, `add_note`, `delete_entry`, `remember`, `forget`, `show_view`, `add_theme`, `trello_move`, `trello_create`, `launch_task`. `trello_move`/`trello_create` écrivent dans Trello et `launch_task` lance une tâche claude dans un dépôt — toutes après confirmation orale (et, pour Trello, un jeton d'écriture ; pour les tâches, `ULTRON_AGENT=1`). Le détail des champs est dans `SYSTEM_PROMPT` (`server.js`), qui fait foi. Une réponse qui n'est pas du JSON est dite telle quelle, sans action.
 
 ### 6.5 État d'une session Claude Code
 

@@ -38,6 +38,7 @@ const CFG = {
   ttsKey: process.env.ULTRON_TTS_KEY || '',
   ttsVoice: process.env.ULTRON_TTS_VOICE || '',
   usageCmd: process.env.ULTRON_USAGE_CMD || '', // S5-3 : commande qui imprime l'usage de l'abonnement en JSON
+  agent: process.env.ULTRON_AGENT === '1', // S5-1/S5-2 : lancer de vraies tâches claude (opt-in, désactivé par défaut)
 };
 
 const DATA_DIR = process.env.ULTRON_DATA_DIR ? path.resolve(process.env.ULTRON_DATA_DIR) : path.join(ROOT, 'data');
@@ -592,6 +593,8 @@ Actions disponibles (tableau vide si aucune) :
 - {"type":"trello_create","board":"Homepedia","list":"À faire","name":"Corriger le lien de login","desc":""}
   Crée un ticket Trello dans une colonne.
   ÉCRITURE DANS TRELLO — règle stricte : ne JAMAIS émettre trello_move ni trello_create sans avoir d'abord reformulé l'action et obtenu un « oui » explicite dans le message en cours. À la première demande, tu ne fais que décrire ce que tu vas faire et tu poses la question ; tu n'émets l'action qu'au tour suivant, une fois la confirmation reçue. N'invente jamais un nom de tableau, de carte ou de colonne absent du contexte.
+- {"type":"launch_task","project":"Homepedia","prompt":"ajoute un test pour la pagination"}
+  Lance une vraie tâche Claude Code dans le dossier du projet (« lance sur Homepedia : … »). MÊME RÈGLE STRICTE que pour Trello : reformule la tâche et obtiens un « oui » explicite avant d'émettre l'action ; jamais au premier message. Cette tâche modifie un dépôt et consomme l'abonnement.
 
 Bilan du jour : quand il le demande, pose une seule question à la fois, d'abord sur les mesures « pas encore saisies aujourd'hui » du contexte, enregistre chaque réponse au fur et à mesure, puis conclus en une phrase. S'il répond « je ne sais pas » ou « passe », passe à la suivante.
 
@@ -968,6 +971,57 @@ async function applyTrello(actions) {
   return applied;
 }
 
+/* ── S5-1/S5-2 : lancer et suivre de vraies tâches claude (opt-in ULTRON_AGENT=1) ──
+   Désactivé par défaut. Chaque lancement agit sur un dépôt et consomme l'abonnement :
+   l'IA doit confirmer oralement avant d'émettre launch_task. */
+let tasks = [];
+
+// Dossier d'un projet : on le déduit d'une session Claude Code récente du même nom (voir S3-2).
+async function resolveProjectDir(project) {
+  const s = await getSessions();
+  const p = plain(project || '');
+  if (!p) return null;
+  const hit = (s.items || []).find((x) => x.cwd && plain(path.basename(x.cwd)) === p);
+  return hit ? hit.cwd : null;
+}
+
+function launchTask(project, prompt, cwd) {
+  const win = process.platform === 'win32';
+  const task = { id: uid(), project, prompt: clip(String(prompt || ''), 500), cwd, state: 'running', startedAt: new Date().toISOString(), endedAt: null, result: '' };
+  tasks.unshift(task);
+  tasks = tasks.slice(0, 20);
+  let out = '', err = '';
+  let child;
+  try {
+    child = spawn(CFG.claudeBin, ['-p', String(prompt || '')], { cwd, env: claudeEnv(), shell: win, windowsHide: true });
+  } catch (e) {
+    task.state = 'error'; task.endedAt = new Date().toISOString(); task.result = e.message;
+    return task;
+  }
+  const finish = (state, text) => { if (task.state === 'running') { task.state = state; task.endedAt = new Date().toISOString(); task.result = clip(String(text || '').trim(), 1000); } };
+  child.stdin.on('error', () => {});
+  child.stdin.end(); // le prompt est passé en argument ; on ferme l'entrée pour ne rien faire attendre
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { err += d; });
+  child.on('error', (e) => finish('error', e.code === 'ENOENT' ? `Commande « ${CFG.claudeBin} » introuvable` : e.message));
+  child.on('close', (code) => finish(code === 0 ? 'done' : 'error', out || err));
+  return task;
+}
+
+async function applyAgent(actions) {
+  const ops = actions.filter((a) => a && a.type === 'launch_task');
+  if (!ops.length) return [];
+  const applied = [];
+  for (const a of ops.slice(0, 3)) {
+    if (!CFG.agent) { applied.push({ type: 'task', text: 'Le lancement de tâches est désactivé (mets ULTRON_AGENT=1 pour l\'activer).' }); continue; }
+    const cwd = await resolveProjectDir(a.project);
+    if (!cwd) { applied.push({ type: 'task', text: `Je ne connais pas le dossier du projet « ${a.project || '?'} » (ouvre-y une session Claude Code d'abord).` }); continue; }
+    const t = launchTask(a.project, a.prompt, cwd);
+    applied.push({ type: 'task', text: t.state === 'error' ? `Tâche non lancée : ${t.result}` : `Tâche lancée sur ${a.project}.` });
+  }
+  return applied;
+}
+
 async function buildPrompt(message) {
   const state = await buildState();
   const history = db.chat.slice(-10).map((m) => `${m.role === 'user' ? 'Moi' : 'Ultron'} : ${clip(m.text, 600)}`).join('\n');
@@ -980,6 +1034,8 @@ async function finishChat(message, raw) {
   const applied = applyActions(reply.actions);
   // Écritures Trello (après confirmation orale) : réseau, donc à part et asynchrone.
   if (reply.actions.some((a) => a && /^trello_/.test(a.type))) applied.push(...await applyTrello(reply.actions));
+  // Lancement de tâches claude (S5-1), après confirmation orale et seulement si activé.
+  if (reply.actions.some((a) => a && a.type === 'launch_task')) applied.push(...await applyAgent(reply.actions));
   // Une réponse vide ne doit pas masquer ce qui vient d'être enregistré.
   const say = reply.say || (applied.length ? 'C\'est noté.' : 'Je n\'ai rien à répondre à ça.');
   const ts = new Date().toISOString();
@@ -1054,6 +1110,7 @@ async function buildState(force = false) {
     trello,
     sessions,
     usage,
+    tasks: tasks.map((t) => ({ ...t, durationMs: (t.endedAt ? Date.parse(t.endedAt) : Date.now()) - Date.parse(t.startedAt) })),
     tracking: buildTracking(),
     notes: db.notes.slice(-6).reverse(),
     memory: db.memory.slice().reverse(),

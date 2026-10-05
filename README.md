@@ -40,6 +40,12 @@ Ultron peut **déplacer un ticket** ou **en créer un** à la voix : « déplace
 - **Confirmation orale.** Ultron reformule d'abord l'action et attend ton « oui » ; il n'écrit qu'ensuite. Il ne touche jamais à un tableau, une carte ou une colonne absents de ce qu'il voit.
 - **Jeton avec droit d'écriture.** La lecture seule suffit pour tout le reste ; pour écrire, le `TRELLO_TOKEN` doit avoir le droit d'écriture (au moment de créer le jeton, autorise l'écriture). Sans ça, Ultron te dit que l'écriture est refusée au lieu d'échouer en silence.
 
+## Lancer des tâches (expérimental, désactivé par défaut)
+
+Avec `ULTRON_AGENT=1` dans `.env`, Ultron peut **lancer de vraies tâches Claude Code** dans tes dépôts : « lance sur Homepedia : ajoute un test pour la pagination ». Ultron reformule et attend ton « oui » avant de démarrer. La tâche tourne dans le dossier du projet (déduit d'une session Claude Code du même nom), et la vue Travail liste les tâches avec leur état et leur durée ; Ultron te prévient à voix haute quand une tâche se termine ou échoue.
+
+C'est le mode « acteur » : ces tâches **modifient ton code** et **consomment l'abonnement**. Sans `ULTRON_AGENT=1`, Ultron refuse poliment et ne lance rien.
+
 ## Lui parler
 
 - Clique sur l'orbe, ou maintiens Espace, puis parle. Échap coupe la parole.

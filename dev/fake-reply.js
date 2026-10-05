@@ -26,6 +26,9 @@ module.exports = function reply(msg) {
   const cr = msg.match(/cr[ée]e?[sz]?\s+(?:une\s+)?carte\s+(.+?)\s+dans\s+(.+?)(?:\s+sur\s+(.+))?$/i);
   if (cr) { actions.push({ type: 'trello_create', board: (cr[3] || 'Homepedia').trim(), list: cr[2].trim(), name: cr[1].trim() }); said.push(`créer la carte « ${cr[1].trim()} »`); }
 
+  const lt = msg.match(/lance\s+sur\s+(.+?)\s*:\s*(.+)$/i);
+  if (lt) { actions.push({ type: 'launch_task', project: lt[1].trim(), prompt: lt[2].trim() }); said.push(`lancer une tâche sur ${lt[1].trim()}`); }
+
   let say;
   if (actions.length) say = `C'est noté : ${said.join(', ')}.`;
   else if (/stats|objectif|où j'en suis/i.test(msg)) { actions.push({ type: 'show_view', view: 'moi' }); say = 'Voilà tes chiffres. Réponse de démonstration : le vrai Ultron lirait le contexte.'; }

@@ -157,11 +157,11 @@ Lu dans `~/.claude/projects/*/*.jsonl` (début et fin du fichier seulement). C'e
 
 Tout ce qui est marqué « fait » a été essayé avec `npm run demo` : faux Trello, fausses sessions, fausse IA, sept semaines de données inventées, navigateur automatisé.
 
-L'API Trello a été validée avec une vraie clé le 5 octobre 2026 : les tableaux réels s'affichent, chaque colonne tombe dans le bon statut (y compris avec préfixes emoji), et une clé invalide renvoie le message d'erreur prévu (T1).
+L'API Trello a été validée avec une vraie clé le 5 octobre 2026 : les tableaux réels s'affichent, chaque colonne tombe dans le bon statut (y compris avec préfixes emoji), et une clé invalide renvoie le message d'erreur prévu (T1). Le format réel des fichiers de session de la version installée de Claude Code a été validé le même jour : `readSession` détecte correctement les états « travaille », « t'attend » (dont l'attente d'autorisation) et « en pause » sur de vraies sessions (T5).
 
-Jamais essayé en conditions réelles : la vraie CLI `claude` connectée à un abonnement, le micro et la synthèse vocale, le format réel des fichiers de session de la version installée de Claude Code, Windows.
+Jamais essayé en conditions réelles : la vraie CLI `claude` connectée à un abonnement, le micro et la synthèse vocale, Windows.
 
-Il n'y a pas encore de tests automatisés.
+Les premiers tests automatisés existent (`npm test`, `node:test`, sans dépendance) : ils couvrent `listStatus`, `slopePerDay`, `streaks`, `evalGoal`, `parseReply`, `applyActions` et `isLocalRequest`.
 
 ## 8. Feuille de route
 

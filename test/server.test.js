@@ -203,6 +203,18 @@ test('applyActions : objectif, note, mémoire, suppression et vue', () => {
   assert.equal(view.view, 'moi');
 });
 
+test('applyActions : add_theme crée un thème, réutilisable aussitôt par log_metric (S2-5)', () => {
+  S.__setDb(emptyDb());
+  const applied = S.applyActions([
+    { type: 'add_theme', key: 'Cuisine', label: 'Cuisine' },
+    { type: 'log_metric', key: 'cafe', agg: 'sum', unit: 'tasses', category: 'cuisine', value: 2 },
+  ]);
+  const db = S.__getDb();
+  assert.ok(db.themes.some((t) => t.key === 'cuisine'), 'le thème cuisine existe');
+  assert.equal(db.metrics.cafe.category, 'cuisine'); // le log_metric suivant a pu l'utiliser
+  assert.ok(applied.some((a) => a.type === 'add_theme'));
+});
+
 /* ───────────── isLocalRequest ───────────── */
 
 test('isLocalRequest n’accepte que l’hôte local attendu', () => {

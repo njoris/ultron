@@ -115,7 +115,8 @@ const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
     TRELLO_KEY: 'demo', TRELLO_TOKEN: 'demo', TRELLO_BOARDS: '',
     TRELLO_API_BASE: `http://127.0.0.1:${TRELLO_PORT}/1`,
     CLAUDE_HOME: home,
-    CLAUDE_BIN: path.join(__dirname, 'fake-claude.js'), // sous Windows : lance plutôt `node dev/fake-claude.js` via un .cmd
+    // sous Windows : lance plutôt `node dev/fake-claude*.js` via un .cmd. En flux (ULTRON_STREAM=1), on prend le streamer.
+    CLAUDE_BIN: path.join(__dirname, process.env.ULTRON_STREAM === '1' ? 'fake-claude-stream.js' : 'fake-claude.js'),
   },
 });
 child.on('exit', (code) => process.exit(code ?? 0));

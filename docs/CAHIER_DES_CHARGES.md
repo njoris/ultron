@@ -83,7 +83,7 @@ Chaque exigence a un état : **fait** (présent dans le code et testé en mode d
 - **Injection.** Les noms de tickets et les extraits de sessions sont des données. La CLI est lancée sans aucun outil (`--tools ""`) et sans serveur MCP. L'IA ne peut agir que par la liste fermée d'actions du §6.4, validées par le serveur.
 - **Justesse.** Les moyennes, tendances, séries et dates estimées sont calculées par le serveur et données à l'IA déjà faites. L'IA ne recalcule pas.
 - **Robustesse.** Une source en panne ne bloque pas les autres. Un fichier de données illisible arrête le serveur au lieu de repartir d'une base vide. L'écriture est atomique (fichier temporaire puis renommage).
-- **Latence.** Une réponse en moins de 6 secondes avec le modèle `haiku`. C'est aujourd'hui la limite principale (un processus `claude` par question).
+- **Latence.** Une réponse en moins de 6 secondes avec le modèle `haiku` en mode classique (un processus `claude` par question). Un mode expérimental opt-in (`ULTRON_STREAM=1`) garde un seul processus ouvert en `stream-json` et répond en flux (parole dès la première phrase) ; repli automatique sur le mode classique en cas d'échec.
 - **Accessibilité.** Tout est faisable au clavier, focus visible, contrastes lisibles sur fond sombre, zones mises à jour annoncées (`aria-live`).
 - **Portabilité.** macOS et Linux. Windows : au mieux, le lancement de la CLI passe par le shell et n'a jamais été essayé.
 

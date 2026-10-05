@@ -33,6 +33,7 @@ const CFG = {
   claudeHome: process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude'),
   sessionHours: Number(process.env.SESSION_HOURS) || 72,
   useApiKey: process.env.ULTRON_USE_API_KEY === '1',
+  stream: process.env.ULTRON_STREAM === '1', // S4 : process claude persistant + réponse en flux (opt-in)
 };
 
 const DATA_DIR = process.env.ULTRON_DATA_DIR ? path.resolve(process.env.ULTRON_DATA_DIR) : path.join(ROOT, 'data');
@@ -750,6 +751,83 @@ function runClaude(prompt) {
   });
 }
 
+/* ── S4-1/S4-2 : process claude persistant + réponse en flux (opt-in ULTRON_STREAM=1) ──
+   On garde un seul process ouvert en --input-format/-output-format stream-json ; chaque question
+   est une ligne JSON sur stdin, la réponse arrive en événements. Repli sur runClaude en cas d'échec. */
+let streamChild = null;
+
+// Événement stream-json → { delta } (morceau de texte) ou { done, result } (fin de réponse).
+function streamEvent(obj) {
+  if (!obj || typeof obj !== 'object') return {};
+  if (obj.type === 'stream_event') {
+    const d = obj.event && obj.event.delta;
+    if (d && d.type === 'text_delta' && typeof d.text === 'string') return { delta: d.text };
+    return {};
+  }
+  if (obj.type === 'result') return { done: true, result: typeof obj.result === 'string' ? obj.result : '' };
+  return {};
+}
+
+function streamClaudeArgs() {
+  const win = process.platform === 'win32';
+  const q = (s) => (win ? `"${s}"` : s);
+  const args = ['-p', '--output-format', 'stream-json', '--input-format', 'stream-json',
+    '--include-partial-messages', '--verbose',
+    '--system-prompt-file', q(SYS_FILE),
+    '--no-session-persistence', '--strict-mcp-config', '--tools', win ? '""' : ''];
+  if (CFG.claudeModel) args.push('--model', CFG.claudeModel);
+  return args;
+}
+
+function ensureStreamChild() {
+  if (streamChild && !streamChild.killed) return streamChild;
+  const win = process.platform === 'win32';
+  const child = spawn(CFG.claudeBin, streamClaudeArgs(), { cwd: AI_CWD, env: claudeEnv(), shell: win, windowsHide: true });
+  child.stdin.on('error', () => {});
+  const drop = () => { if (streamChild === child) streamChild = null; };
+  child.on('exit', drop);
+  child.on('error', drop);
+  let buf = '';
+  child.stdout.on('data', (d) => {
+    buf += d;
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line && child.onLine) child.onLine(line);
+    }
+  });
+  streamChild = child;
+  return child;
+}
+
+// Envoie un prompt au process persistant ; onDelta reçoit chaque morceau de texte au fil de l'eau.
+function runClaudeStream(prompt, onDelta) {
+  return new Promise((resolve, reject) => {
+    let child;
+    try { child = ensureStreamChild(); } catch (e) { return reject(e); }
+    let acc = '';
+    const cleanup = () => { clearTimeout(timer); child.onLine = null; };
+    const timer = setTimeout(() => {
+      cleanup();
+      try { child.kill(); } catch { /* déjà mort */ }
+      streamChild = null;
+      reject(new Error('Claude n\'a pas répondu en 2 minutes. Réessaie.'));
+    }, 120_000);
+    child.onLine = (line) => {
+      let obj;
+      try { obj = JSON.parse(line); } catch { return; }
+      const ev = streamEvent(obj);
+      if (ev.delta) { acc += ev.delta; if (onDelta) onDelta(ev.delta, acc); }
+      if (ev.done) { cleanup(); resolve(ev.result || acc); }
+    };
+    child.on('error', (e) => { cleanup(); reject(e); });
+    try {
+      child.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: prompt }] } }) + '\n');
+    } catch (e) { cleanup(); reject(e); }
+  });
+}
+
 function parseReply(text) {
   const candidates = [text.trim()];
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -886,11 +964,14 @@ async function applyTrello(actions) {
   return applied;
 }
 
-async function chat(message) {
+async function buildPrompt(message) {
   const state = await buildState();
   const history = db.chat.slice(-10).map((m) => `${m.role === 'user' ? 'Moi' : 'Ultron'} : ${clip(m.text, 600)}`).join('\n');
-  const prompt = `<contexte>\n${buildContext(state)}\n</contexte>\n\n<historique>\n${history || '(début de conversation)'}\n</historique>\n\n<message>\n${message}\n</message>`;
-  const raw = await runClaude(prompt);
+  return `<contexte>\n${buildContext(state)}\n</contexte>\n\n<historique>\n${history || '(début de conversation)'}\n</historique>\n\n<message>\n${message}\n</message>`;
+}
+
+// Applique la réponse brute de la CLI (actions, Trello, mémoire du chat). Commun aux deux modes.
+async function finishChat(message, raw) {
   const reply = parseReply(raw);
   const applied = applyActions(reply.actions);
   // Écritures Trello (après confirmation orale) : réseau, donc à part et asynchrone.
@@ -902,6 +983,19 @@ async function chat(message) {
   db.chat = db.chat.slice(-200);
   saveDb();
   return { say, applied, view: applied.view || null };
+}
+
+async function chat(message) {
+  return finishChat(message, await runClaude(await buildPrompt(message)));
+}
+
+// Mode flux : le texte arrive par morceaux (onDelta), avec repli sur le mode mono-coup en cas d'échec.
+async function chatStream(message, onDelta) {
+  const prompt = await buildPrompt(message);
+  let raw;
+  try { raw = await runClaudeStream(prompt, onDelta); }
+  catch { raw = await runClaude(prompt); }
+  return finishChat(message, raw);
 }
 
 /* ───────────────────────── HTTP ───────────────────────── */
@@ -918,7 +1012,7 @@ async function buildState(force = false) {
     notes: db.notes.slice(-6).reverse(),
     memory: db.memory.slice().reverse(),
     chat: db.chat.slice(-30),
-    ai: { model: CFG.claudeModel || null, lastError: aiLastError },
+    ai: { model: CFG.claudeModel || null, lastError: aiLastError, stream: CFG.stream },
   };
 }
 
@@ -980,6 +1074,30 @@ const server = http.createServer(async (req, res) => {
       } finally {
         aiBusy = false;
       }
+    }
+
+    // Réponse en flux (S4-2) : SSE. L'interface n'y vient que si CFG.stream est actif.
+    if (route === 'POST /api/chat/stream') {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      let message = '';
+      try { message = String(JSON.parse(await readBody(req)).message || '').trim(); } catch { return sendJson(res, 400, { error: 'Message illisible.' }); }
+      if (!message) return sendJson(res, 400, { error: 'Message vide.' });
+      if (aiBusy) return sendJson(res, 429, { error: 'Je réponds déjà à ta question précédente.' });
+      aiBusy = true;
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+      const sse = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      try {
+        const out = await chatStream(message.slice(0, 4000), (delta) => sse({ delta }));
+        aiLastError = null;
+        sse({ done: true, ...out });
+      } catch (e) {
+        aiLastError = e.message;
+        sse({ error: e.message });
+      } finally {
+        aiBusy = false;
+        res.end();
+      }
+      return;
     }
 
     // Saisie manuelle d'une valeur, à n'importe quelle date, sans passer par l'IA.
@@ -1137,7 +1255,7 @@ if (require.main === module) start();
 // Exposé pour les tests. __setDb/__getDb donnent accès à l'état en mémoire sans toucher à data/.
 module.exports = {
   listStatus, currentSprint, slopePerDay, streaks, evalGoal, applyActions, parseReply, isLocalRequest,
-  claudeEnv, entriesToCsv, addDays, CFG,
+  claudeEnv, entriesToCsv, streamEvent, addDays, CFG,
   __setDb: (next) => { db = next; },
   __getDb: () => db,
 };

@@ -33,6 +33,13 @@ Pour continuer le développement avec Claude Code : le besoin et la feuille de r
 
 Ultron lit seulement. Les colonnes sont classées par leur nom : « terminer / done / fini » comptent comme terminé, « Q&A / review / test » comme en revue, « en cours / doing » comme en cours, tout le reste comme à faire. Les étiquettes (par exemple « Sprint 3 ») sont affichées à côté des tickets et transmises à l'IA. Celles de la forme « Sprint N » servent aussi à afficher, par projet, l'avancement du sprint courant (le plus récent non terminé). Pour changer ces règles : fonctions `listStatus` et `currentSprint` dans `server.js`.
 
+## Agir sur Trello
+
+Ultron peut **déplacer un ticket** ou **en créer un** à la voix : « déplace Page de connexion vers En cours », « crée une carte Corriger le login dans À faire sur Homepedia ». Deux garde-fous :
+
+- **Confirmation orale.** Ultron reformule d'abord l'action et attend ton « oui » ; il n'écrit qu'ensuite. Il ne touche jamais à un tableau, une carte ou une colonne absents de ce qu'il voit.
+- **Jeton avec droit d'écriture.** La lecture seule suffit pour tout le reste ; pour écrire, le `TRELLO_TOKEN` doit avoir le droit d'écriture (au moment de créer le jeton, autorise l'écriture). Sans ça, Ultron te dit que l'écriture est refusée au lieu d'échouer en silence.
+
 ## Lui parler
 
 - Clique sur l'orbe, ou maintiens Espace, puis parle. Échap coupe la parole.

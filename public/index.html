@@ -457,6 +457,63 @@ function addMsg(kind, text, applied) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+// En mode flux, les deltas construisent un JSON {say, actions} : on en extrait le "say" au fil de l'eau.
+function partialSay(raw) {
+  const m = raw.match(/"say"\s*:\s*"((?:[^"\\]|\\.)*)/);
+  if (!m) return '';
+  let s = m[1];
+  if (s.endsWith('\\')) s = s.slice(0, -1); // couper une séquence d'échappement incomplète
+  try { return JSON.parse('"' + s + '"'); } catch { return s.replace(/\\"/g, '"').replace(/\\n/g, ' '); }
+}
+// File de parole SANS cancel (pour enchaîner plusieurs phrases). Seule la dernière rouvre le micro.
+function speakQueued(text, last, onLast) {
+  if (!ui.speakOn || !('speechSynthesis' in window) || !text) { if (last) { setCore('idle'); onLast?.(); } return; }
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'fr-FR';
+  const v = pickVoice(); if (v) u.voice = v;
+  u.rate = 1.06;
+  u.onstart = () => { ui.speaking = true; stopRec(true); setCore('speaking', ''); };
+  const done = () => { if (last) { ui.speaking = false; setCore('idle'); resumeWake(); onLast?.(); } };
+  u.onend = done; u.onerror = done;
+  speechSynthesis.speak(u);
+}
+
+async function sendStream(text, reopenMic) {
+  const res = await fetch('/api/chat/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
+  if (!res.ok || !res.body) { const o = await res.json().catch(() => ({})); throw new Error(o.error || `Erreur ${res.status}`); }
+  const el = h('div', { class: 'msg ultron' }, '');
+  logEl.append(el); logEl.scrollTop = logEl.scrollHeight;
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = '', raw = '', firstSpoken = '', out = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const line = buf.slice(0, i).replace(/^data: ?/, ''); buf = buf.slice(i + 2);
+      let ev; try { ev = JSON.parse(line); } catch { continue; }
+      if (ev.error) throw new Error(ev.error);
+      if (ev.delta) {
+        raw += ev.delta;
+        const s = partialSay(raw);
+        if (s) { el.textContent = s; logEl.scrollTop = logEl.scrollHeight; }
+        // dès la première phrase complète (suivie d'une espace), on la prononce
+        if (!firstSpoken) { const mm = s.match(/^\s*([\s\S]*?[.!?])\s/); if (mm) { firstSpoken = mm[1].trim(); speakQueued(firstSpoken, false); } }
+      }
+      if (ev.done) out = ev;
+    }
+  }
+  if (!out) throw new Error('Réponse interrompue.');
+  el.textContent = out.say;
+  if (out.applied?.length) el.append(h('ul', { class: 'applied' }, out.applied.map((a) => h('li', null, a.text))));
+  logEl.scrollTop = logEl.scrollHeight;
+  let remainder = out.say;
+  if (firstSpoken && out.say.startsWith(firstSpoken)) remainder = out.say.slice(firstSpoken.length).trim();
+  speakQueued(remainder || (firstSpoken ? ' ' : out.say), true, () => reopenMic(out.say));
+  return out;
+}
+
 async function send(text, viaVoice) {
   text = text.trim();
   if (!text || ui.busy) return;
@@ -466,23 +523,30 @@ async function send(text, viaVoice) {
   stopSpeaking();
   addMsg('me', text);
   setCore('thinking');
+  // Ultron vient de poser une question à l'oral : on rouvre le micro sans attendre un clic.
+  const reopenMic = (said) => {
+    if (!(viaVoice && ui.speakOn && SR && /\?\s*$/.test(said || ''))) return;
+    if (ui.wake) { ui.armedUntil = Date.now() + 8000; setCore('listening'); if (!rec) startRec('wake'); }
+    else startRec('ptt');
+  };
   try {
-    const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
-    const out = await res.json();
-    if (!res.ok) throw new Error(out.error || `Erreur ${res.status}`);
-    addMsg('ultron', out.say, out.applied);
-    if (out.view) setView(out.view);
-    ui.busy = false;
-    // Ultron vient de poser une question à l'oral : on rouvre le micro sans attendre un clic.
-    const listenNext = viaVoice && ui.speakOn && SR && /\?\s*$/.test(out.say);
-    speak(out.say, listenNext ? () => {
-      if (ui.wake) { ui.armedUntil = Date.now() + 8000; setCore('listening'); if (!rec) startRec('wake'); }
-      else startRec('ptt');
-    } : null);
-    refresh();
+    if (state && state.ai && state.ai.stream) {
+      const out = await sendStream(text, reopenMic);
+      if (out.view) setView(out.view);
+      refresh();
+    } else {
+      const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error || `Erreur ${res.status}`);
+      addMsg('ultron', out.say, out.applied);
+      if (out.view) setView(out.view);
+      ui.busy = false;
+      const listenNext = viaVoice && ui.speakOn && SR && /\?\s*$/.test(out.say);
+      speak(out.say, listenNext ? () => reopenMic(out.say) : null);
+      refresh();
+    }
   } catch (e) {
     addMsg('err', e.message === 'Failed to fetch' ? 'Le serveur Ultron ne répond pas. Relance « npm start » dans le dossier du projet.' : e.message);
-    ui.busy = false;
     setCore('idle');
     resumeWake();
   } finally {

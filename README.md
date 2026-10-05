@@ -100,7 +100,7 @@ navigateur (public/index.html)          server.js (127.0.0.1 uniquement)
 - Tes mesures s'exportent en CSV depuis le bouton « Exporter en CSV » du Journal (ou `GET /api/export.csv`). Une copie datée de `data/ultron.json` est faite une fois par jour dans `data/backups/`, les sept dernières étant conservées.
 - « Rappel du soir » (réglage dans la colonne de gauche, 21 h par défaut, vide pour couper) : si la page est ouverte à l'heure dite et qu'il manque des saisies habituelles, Ultron te le dit une fois dans la journée.
 - La voix est celle du navigateur (`speechSynthesis`). Pour une meilleure voix, c'est la fonction `speak` de `public/index.html` qu'il faut remplacer.
-- Chaque question lance un `claude -p` : compte deux à six secondes de délai, et l'usage est décompté de ton abonnement Claude. Anthropic a annoncé puis suspendu en juin 2026 un passage de `claude -p` sur un crédit séparé ; si ça revient, c'est ici que ça se verra.
+- Chaque question lance un `claude -p` : compte deux à six secondes de délai, et l'usage est décompté de ton abonnement Claude. Expérimental : mets `ULTRON_STREAM=1` dans `.env` pour garder un seul process `claude` ouvert et répondre en flux (Ultron commence à parler dès la première phrase). Plus rapide, à valider chez toi ; en cas de souci, Ultron retombe sur le mode classique. Anthropic a annoncé puis suspendu en juin 2026 un passage de `claude -p` sur un crédit séparé ; si ça revient, c'est ici que ça se verra.
 - Testé sous Linux avec un faux Trello et un faux binaire `claude`. Sous Windows, le lancement de la CLI passe par le shell : à vérifier chez toi.
 
 ## Validation manuelle (reste du Sprint 1)

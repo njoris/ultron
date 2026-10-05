@@ -238,6 +238,16 @@ test('applyActions : add_theme crée un thème, réutilisable aussitôt par log_
   assert.ok(applied.some((a) => a.type === 'add_theme'));
 });
 
+/* ───────────── streamEvent (S4-2) ───────────── */
+
+test('streamEvent extrait les deltas de texte et le résultat final', () => {
+  assert.deepEqual(
+    S.streamEvent({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Bon' } } }),
+    { delta: 'Bon' });
+  assert.deepEqual(S.streamEvent({ type: 'result', subtype: 'success', result: '{"say":"ok"}' }), { done: true, result: '{"say":"ok"}' });
+  assert.deepEqual(S.streamEvent({ type: 'system', subtype: 'init' }), {});
+});
+
 /* ───────────── entriesToCsv (S2-6) ───────────── */
 
 test('entriesToCsv produit un CSV avec en-tête, BOM et échappement des notes', () => {

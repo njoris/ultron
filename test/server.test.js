@@ -108,6 +108,18 @@ test('evalGoal (weekly) : atteint et en retard', () => {
   assert.equal(behind.status, 'behind');
 });
 
+test('evalGoal (reach) : le lissage s’appuie sur la moyenne 7 jours (S2-3)', () => {
+  const t = '2026-10-05';
+  const base = { agg: 'last', unit: 'kg', avg7: 76, points: [{ date: t, value: 70 }], slope: -0.5 };
+  // Sans lissage, la dernière valeur (70) a déjà dépassé l'objectif (75, en descente) → atteint.
+  const raw = S.evalGoal({ kind: 'reach', target: 75, start: 80 }, { ...base, smooth: false }, t);
+  assert.equal(raw.reached, true);
+  // Avec lissage, on utilise la moyenne 7 jours (76) → pas encore atteint.
+  const smoothed = S.evalGoal({ kind: 'reach', target: 75, start: 80 }, { ...base, smooth: true }, t);
+  assert.equal(smoothed.reached, false);
+  assert.equal(smoothed.current, 76);
+});
+
 /* ───────────── parseReply ───────────── */
 
 test('parseReply lit un JSON simple', () => {

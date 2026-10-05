@@ -36,6 +36,29 @@ test('listStatus reconnaît les variantes courantes', () => {
   assert.equal(S.listStatus('Fini'), 'done');
 });
 
+/* ───────────── currentSprint (S3-1) ───────────── */
+
+test('currentSprint prend le sprint le plus récent non terminé', () => {
+  const cards = [
+    { status: 'done', labels: ['Sprint 1'] },
+    { status: 'done', labels: ['Sprint 1'] },      // Sprint 1 : 2/2, terminé
+    { status: 'todo', labels: ['Sprint 2'] },
+    { status: 'done', labels: ['Sprint 2'] },      // Sprint 2 : 1/2, en cours
+    { status: 'doing', labels: ['autre étiquette'] },
+  ];
+  const s = S.currentSprint(cards);
+  assert.equal(s.n, 2);
+  assert.equal(s.done, 1);
+  assert.equal(s.total, 2);
+});
+
+test('currentSprint : tous terminés → le plus récent ; aucune étiquette → null', () => {
+  const allDone = S.currentSprint([{ status: 'done', labels: ['Sprint 1'] }, { status: 'done', labels: ['Sprint 3'] }]);
+  assert.equal(allDone.n, 3);
+  assert.equal(allDone.progress, 1);
+  assert.equal(S.currentSprint([{ status: 'todo', labels: ['bug'] }, { status: 'todo', labels: [] }]), null);
+});
+
 /* ───────────── slopePerDay ───────────── */
 
 test('slopePerDay renvoie la pente par jour sur une série croissante régulière', () => {

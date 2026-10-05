@@ -26,12 +26,30 @@ const LISTS = {
   ],
   b2: [{ id: 'm1', name: 'À faire', cards: [card('d1', 'Migration Postgres 16')] }, { id: 'm2', name: 'En cours', cards: [] }, { id: 'm3', name: 'Terminer', cards: [card('d2', 'Auth')] }],
 };
+const allLists = () => Object.values(LISTS).flat();
+const findListById = (id) => allLists().find((l) => l.id === id);
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
   res.setHeader('content-type', 'application/json');
   if (u.pathname === '/1/members/me/boards') return res.end(JSON.stringify(BOARDS));
   const m = u.pathname.match(/^\/1\/boards\/(\w+)\/lists$/);
   if (m && LISTS[m[1]]) return res.end(JSON.stringify(LISTS[m[1]]));
+  // Écritures (S3-3) : créer et déplacer des cartes, en mutant les listes en mémoire.
+  if (req.method === 'POST' && u.pathname === '/1/cards') {
+    const list = findListById(u.searchParams.get('idList'));
+    if (!list) { res.statusCode = 400; return res.end('{}'); }
+    const c = card('n' + Date.now().toString(36), u.searchParams.get('name') || 'Sans titre');
+    list.cards.push(c);
+    return res.end(JSON.stringify(c));
+  }
+  const cm = u.pathname.match(/^\/1\/cards\/(\w+)$/);
+  if (req.method === 'PUT' && cm) {
+    const dest = findListById(u.searchParams.get('idList'));
+    let moved = null;
+    for (const l of allLists()) { const i = l.cards.findIndex((c) => c.id === cm[1]); if (i >= 0) { [moved] = l.cards.splice(i, 1); break; } }
+    if (moved && dest) { dest.cards.push(moved); return res.end(JSON.stringify(moved)); }
+    res.statusCode = 404; return res.end('{}');
+  }
   res.statusCode = 404; res.end('{}');
 }).listen(TRELLO_PORT, '127.0.0.1');
 

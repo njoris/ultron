@@ -134,16 +134,22 @@ function entriesToCsv(database) {
 
 let trelloCache = { at: 0, data: null };
 
-async function trelloGet(route, params) {
+async function trelloRequest(method, route, params) {
   const url = new URL(CFG.trelloApi + route);
   for (const [k, v] of Object.entries({ ...params, key: CFG.trelloKey, token: CFG.trelloToken })) {
     url.searchParams.set(k, v);
   }
-  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-  if (res.status === 401) throw new Error('Trello refuse la clé ou le jeton. Vérifie TRELLO_KEY et TRELLO_TOKEN dans .env.');
+  const res = await fetch(url, { method, signal: AbortSignal.timeout(15000) });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(method === 'GET'
+      ? 'Trello refuse la clé ou le jeton. Vérifie TRELLO_KEY et TRELLO_TOKEN dans .env.'
+      : 'Trello refuse l\'écriture : il faut un jeton avec droit d\'écriture (voir README, « Agir sur Trello »).');
+  }
   if (!res.ok) throw new Error(`Trello a répondu ${res.status} sur ${route}.`);
   return res.json();
 }
+
+const trelloGet = (route, params) => trelloRequest('GET', route, params);
 
 // Colonnes → statut. Calé sur « À faire / En cours / Q&A / Terminer », avec les variantes courantes.
 function listStatus(name) {
@@ -576,6 +582,11 @@ Actions disponibles (tableau vide si aucune) :
   Affiche une vue du tableau de bord : "moi" (stats et objectifs perso) ou "travail" (projets et sessions). À utiliser quand il demande à voir l'une ou l'autre, ou quand ta réponse porte dessus et qu'il regarde l'autre.
 - {"type":"add_theme","key":"cuisine","label":"Cuisine"}
   Crée un nouveau thème pour ranger des mesures, quand il le demande (« range ça dans un thème cuisine »). "key" en minuscules, chiffres et underscores. Émets cette action AVANT le "log_metric" qui l'utilise, et mets la même valeur dans "category".
+- {"type":"trello_move","board":"Homepedia","card":"Page de connexion","toList":"En cours"}
+  Déplace un ticket Trello vers une autre colonne. "board", "card" et "toList" sont les noms exacts vus dans le contexte.
+- {"type":"trello_create","board":"Homepedia","list":"À faire","name":"Corriger le lien de login","desc":""}
+  Crée un ticket Trello dans une colonne.
+  ÉCRITURE DANS TRELLO — règle stricte : ne JAMAIS émettre trello_move ni trello_create sans avoir d'abord reformulé l'action et obtenu un « oui » explicite dans le message en cours. À la première demande, tu ne fais que décrire ce que tu vas faire et tu poses la question ; tu n'émets l'action qu'au tour suivant, une fois la confirmation reçue. N'invente jamais un nom de tableau, de carte ou de colonne absent du contexte.
 
 Bilan du jour : quand il le demande, pose une seule question à la fois, d'abord sur les mesures « pas encore saisies aujourd'hui » du contexte, enregistre chaque réponse au fur et à mesure, puis conclus en une phrase. S'il répond « je ne sais pas » ou « passe », passe à la suivante.
 
@@ -839,6 +850,42 @@ function applyActions(actions) {
 let aiBusy = false;
 let aiLastError = null;
 
+// Écritures Trello proposées par l'IA (après confirmation orale). On résout les noms en identifiants
+// à partir des données déjà lues, puis on écrit. Jamais appelé sans que l'IA ait demandé confirmation.
+async function applyTrello(actions) {
+  const ops = actions.filter((a) => a && (a.type === 'trello_create' || a.type === 'trello_move'));
+  if (!ops.length) return [];
+  const data = await getTrello();
+  const boards = data.boards || [];
+  const findBoard = (name) => boards.find((b) => plain(b.name) === plain(name || '')) || (boards.length === 1 ? boards[0] : null);
+  const findList = (b, name) => b.lists.find((l) => plain(l.name) === plain(name || '')) || b.lists.find((l) => listStatus(l.name) === listStatus(name || ''));
+  const applied = [];
+  for (const a of ops.slice(0, 4)) {
+    try {
+      const b = findBoard(a.board);
+      if (!b) { applied.push({ type: 'trello', text: `Tableau « ${a.board || '?'} » introuvable.` }); continue; }
+      if (a.type === 'trello_create') {
+        const list = findList(b, a.list) || b.lists.find((l) => l.status === 'todo') || b.lists[0];
+        const name = clip(String(a.name || '').trim(), 300);
+        if (!list || !name) { applied.push({ type: 'trello', text: 'Il me manque la liste ou le nom de la carte.' }); continue; }
+        await trelloRequest('POST', '/cards', { idList: list.id, name, desc: clip(String(a.desc || ''), 1000) });
+        applied.push({ type: 'trello', text: `Carte « ${clip(name, 60)} » créée dans ${b.name} / ${list.name}` });
+      } else {
+        const cards = b.lists.flatMap((l) => l.cards);
+        const card = cards.find((c) => plain(c.name) === plain(a.card || '')) || cards.find((c) => plain(a.card || '') && plain(c.name).includes(plain(a.card)));
+        const list = findList(b, a.toList);
+        if (!card || !list) { applied.push({ type: 'trello', text: 'Carte ou liste de destination introuvable.' }); continue; }
+        await trelloRequest('PUT', `/cards/${card.id}`, { idList: list.id });
+        applied.push({ type: 'trello', text: `« ${clip(card.name, 60)} » déplacée vers ${list.name} (${b.name})` });
+      }
+      trelloCache = { at: 0, data: null }; // l'écriture change l'état : on forcera une relecture
+    } catch (e) {
+      applied.push({ type: 'trello', text: e.message });
+    }
+  }
+  return applied;
+}
+
 async function chat(message) {
   const state = await buildState();
   const history = db.chat.slice(-10).map((m) => `${m.role === 'user' ? 'Moi' : 'Ultron'} : ${clip(m.text, 600)}`).join('\n');
@@ -846,6 +893,8 @@ async function chat(message) {
   const raw = await runClaude(prompt);
   const reply = parseReply(raw);
   const applied = applyActions(reply.actions);
+  // Écritures Trello (après confirmation orale) : réseau, donc à part et asynchrone.
+  if (reply.actions.some((a) => a && /^trello_/.test(a.type))) applied.push(...await applyTrello(reply.actions));
   // Une réponse vide ne doit pas masquer ce qui vient d'être enregistré.
   const say = reply.say || (applied.length ? 'C\'est noté.' : 'Je n\'ai rien à répondre à ça.');
   const ts = new Date().toISOString();

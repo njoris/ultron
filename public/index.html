@@ -223,6 +223,12 @@
   .proj .sprint { display: inline-block; margin-left: 8px; font-size: 12px; color: var(--mint); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; vertical-align: middle; }
   .proj-sessions { margin-top: 12px; }
   .proj-sessions h4 { margin: 0 0 6px; font-size: 13px; color: var(--fog); font-weight: 600; }
+  .usage { display: flex; gap: 18px; flex-wrap: wrap; }
+  .usage .uwin { flex: 1; min-width: 160px; }
+  .usage .line { display: flex; justify-content: space-between; color: var(--fog); font-size: 14px; }
+  .usage .track { height: 6px; background: var(--steel-600); border-radius: 3px; margin-top: 5px; overflow: hidden; }
+  .usage .track i { display: block; height: 100%; background: var(--mint); }
+  .usage .sub { font-size: 12px; color: var(--fog); }
 
   @media (max-width: 1180px) { .view { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 820px) {
@@ -263,6 +269,7 @@
       <section class="today wide" id="today"></section>
       <section id="projects"></section>
       <section id="sessions"></section>
+      <section id="usage"></section>
     </div>
     <div class="view" id="view-moi" hidden>
       <section class="today wide" id="me-head"></section>
@@ -865,6 +872,20 @@ function sessCard(x) {
     x.lastReply ? h('p', null, x.lastReply) : null);
 }
 
+// S5-3 : usage de l'abonnement, affiché seulement si le serveur a pu le lire (ULTRON_USAGE_CMD).
+function renderUsage() {
+  const u = state.usage;
+  const kids = [];
+  if (u && u.available) {
+    kids.push(h('div', { class: 'head' }, h('h2', null, 'Abonnement Claude')));
+    kids.push(h('div', { class: 'usage' }, u.windows.map((w) => h('div', { class: 'uwin' },
+      h('div', { class: 'line' }, h('span', null, w.label), h('span', null, w.percent != null ? `${w.percent} %` : '')),
+      w.percent != null ? h('div', { class: 'track' }, h('i', { style: `width:${w.percent}%` })) : null,
+      w.resetAt ? h('span', { class: 'sub' }, `réinitialisé ${w.resetAt}`) : null))));
+  }
+  $('#usage').replaceChildren(...kids); // rien si indisponible
+}
+
 function renderSessions() {
   const s = state.sessions;
   const kids = [h('div', { class: 'head' }, h('h2', null, 'Sessions Claude Code'))];
@@ -1260,7 +1281,7 @@ $('#tab-moi').addEventListener('click', () => setView('moi'));
 setView(view);
 
 function render() {
-  renderToday(); renderProjects(); renderSessions();
+  renderToday(); renderProjects(); renderSessions(); renderUsage();
   syncThemes();
   renderMeHead(); renderWeek(); renderGoals(); renderRhythm();
   if (!metricFormFocused) renderMetrics(); // on ne reconstruit pas le détail pendant une saisie

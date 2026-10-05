@@ -455,6 +455,10 @@ function buildTracking() {
     };
     m.weekTotal = m.week; // nom historique, encore lu par l'interface
     m.goals = db.goals.filter((g) => g.key === key).map((g) => ({ ...g, ...evalGoal(g, m, today) }));
+    // Entrées brutes (60 dernières), pour corriger une valeur à la main depuis le détail.
+    m.rawEntries = db.entries.filter((e) => e.key === key)
+      .map((e) => ({ id: e.id, date: e.date, value: e.value, note: e.note || '' }))
+      .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60);
     return m;
   });
   metrics.sort((a, b) => String(b.latest?.date || '').localeCompare(String(a.latest?.date || '')));
@@ -849,6 +853,38 @@ const server = http.createServer(async (req, res) => {
       } finally {
         aiBusy = false;
       }
+    }
+
+    // Saisie manuelle d'une valeur, à n'importe quelle date, sans passer par l'IA.
+    if (req.method === 'POST' && url.pathname === '/api/entries') {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      const key = String(body.key || '');
+      if (!db.metrics[key]) return sendJson(res, 404, { error: 'Mesure inconnue.' });
+      const value = Number(body.value);
+      if (!Number.isFinite(value)) return sendJson(res, 400, { error: 'Valeur invalide.' });
+      const entry = { id: uid(), key, value, date: isDayKey(body.date) ? body.date : dayKey(), note: clip(String(body.note || ''), 200), ts: new Date().toISOString() };
+      db.entries.push(entry);
+      saveDb();
+      return sendJson(res, 200, { ok: true, entry });
+    }
+
+    // Correction d'une valeur existante (valeur, date et note), sans passer par l'IA.
+    const put = url.pathname.match(/^\/api\/entries\/([\w-]+)$/);
+    if (req.method === 'PUT' && put) {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      const entry = db.entries.find((e) => e.id === put[1]);
+      if (!entry) return sendJson(res, 404, { error: 'Introuvable.' });
+      const value = Number(body.value);
+      if (!Number.isFinite(value)) return sendJson(res, 400, { error: 'Valeur invalide.' });
+      entry.value = value;
+      if (isDayKey(body.date)) entry.date = body.date;
+      if (body.note != null) entry.note = clip(String(body.note), 200);
+      saveDb();
+      return sendJson(res, 200, { ok: true, entry });
     }
 
     const del = url.pathname.match(/^\/api\/(entries|goals|notes|memory)\/([\w-]+)$/);

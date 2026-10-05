@@ -49,7 +49,7 @@ Chaque exigence a un état : **fait** (présent dans le code et testé en mode d
 
 | Id | Exigence | État |
 | --- | --- | --- |
-| T1 | Lire tous les tableaux Trello ouverts (ou ceux listés dans `TRELLO_BOARDS`) et classer chaque ticket en à faire, en cours, en revue, terminé d'après le nom de sa colonne. | à valider |
+| T1 | Lire tous les tableaux Trello ouverts (ou ceux listés dans `TRELLO_BOARDS`) et classer chaque ticket en à faire, en cours, en revue, terminé d'après le nom de sa colonne. | fait |
 | T2 | Par projet : barre de progression en quatre segments, tickets actifs, liste « À faire » repliable, étiquettes affichées. | fait |
 | T3 | Bandeau « Aujourd'hui » : une phrase de synthèse, puis trois listes (en cours, échéances du jour et en retard, à valider). | fait |
 | T4 | Si Trello est injoignable, afficher l'erreur et garder les dernières données reçues. Si Trello n'est pas configuré, dire quoi mettre dans `.env`. | fait |
@@ -157,7 +157,9 @@ Lu dans `~/.claude/projects/*/*.jsonl` (début et fin du fichier seulement). C'e
 
 Tout ce qui est marqué « fait » a été essayé avec `npm run demo` : faux Trello, fausses sessions, fausse IA, sept semaines de données inventées, navigateur automatisé.
 
-Jamais essayé en conditions réelles : l'API Trello avec une vraie clé, la vraie CLI `claude` connectée à un abonnement, le micro et la synthèse vocale, le format réel des fichiers de session de la version installée de Claude Code, Windows.
+L'API Trello a été validée avec une vraie clé le 5 octobre 2026 : les tableaux réels s'affichent, chaque colonne tombe dans le bon statut (y compris avec préfixes emoji), et une clé invalide renvoie le message d'erreur prévu (T1).
+
+Jamais essayé en conditions réelles : la vraie CLI `claude` connectée à un abonnement, le micro et la synthèse vocale, le format réel des fichiers de session de la version installée de Claude Code, Windows.
 
 Il n'y a pas encore de tests automatisés.
 

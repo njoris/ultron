@@ -789,6 +789,30 @@ async function remove(coll, id) {
   refresh();
 }
 
+// Crée un thème à la main quand on choisit « + nouveau thème… », et y range la mesure.
+async function newThemeFromSelect(e, key, prevCategory) {
+  if (e.target.value !== '__new__') return;
+  const name = (prompt('Nom du nouveau thème ?') || '').trim();
+  if (!name) { e.target.value = prevCategory; return; }
+  metricFormFocused = false;
+  const r = await fetch('/api/themes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: name }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { addMsg('info', 'Thème impossible : ' + (d.error || 'erreur.')); e.target.value = prevCategory; return; }
+  await fetch(`/api/metrics/${key}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category: d.theme.key }) });
+  refresh();
+}
+
+// Renomme un thème existant.
+async function renameTheme(cat) {
+  if (!cat || cat === '__new__') return;
+  const name = (prompt('Nouveau nom du thème ?', CAT_LABEL[cat] || cat) || '').trim();
+  if (!name) return;
+  metricFormFocused = false;
+  const r = await fetch(`/api/themes/${cat}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: name }) });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); addMsg('info', 'Renommage impossible : ' + (e.error || 'erreur.')); return; }
+  refresh();
+}
+
 // Modifie une mesure (libellé, unité, thème, type), sans passer par l'IA.
 async function saveMetric(key) {
   const smoothEl = $('#ms-smooth');
@@ -839,7 +863,12 @@ async function saveEntry(key) {
 }
 
 /* ───────────────────────── vue « Moi » ───────────────────────── */
-const CAT_LABEL = { corps: 'Corps', sport: 'Sport', sommeil: 'Sommeil', esprit: 'Esprit', argent: 'Argent', autre: 'Autre' };
+// Thèmes : libellés rafraîchis depuis le serveur (state.tracking.themes). Ce repli sert avant le premier état.
+let CAT_LABEL = { corps: 'Corps', sport: 'Sport', sommeil: 'Sommeil', esprit: 'Esprit', argent: 'Argent', autre: 'Autre' };
+function syncThemes() {
+  const ts = state && state.tracking && state.tracking.themes;
+  if (Array.isArray(ts) && ts.length) { const o = {}; for (const t of ts) o[t.key] = t.label; CAT_LABEL = o; }
+}
 const GOAL_STATUS = { reached: 'atteint', on_track: 'dans les temps', behind: 'en retard', stalled: 'à l\'arrêt', unknown: '' };
 let selectedMetric = null;
 let range = Number(localStorage.getItem('ultron.range')) || 30;
@@ -989,8 +1018,10 @@ function metricDetail(m) {
     h('div', { class: 'row' },
       h('input', { id: 'ms-label', type: 'text', 'aria-label': 'Nom', placeholder: 'nom', value: m.label, onfocus: onf, onblur: onb }),
       h('input', { id: 'ms-unit', type: 'text', 'aria-label': 'Unité', placeholder: 'unité', value: m.unit, onfocus: onf, onblur: onb }),
-      h('select', { id: 'ms-cat', 'aria-label': 'Thème', onfocus: onf, onblur: onb },
-        Object.keys(CAT_LABEL).map((c) => h('option', { value: c, selected: c === m.category ? true : null }, CAT_LABEL[c]))),
+      h('select', { id: 'ms-cat', 'aria-label': 'Thème', onfocus: onf, onblur: onb, onchange: (e) => newThemeFromSelect(e, m.key, m.category) },
+        [...Object.keys(CAT_LABEL).map((c) => h('option', { value: c, selected: c === m.category ? true : null }, CAT_LABEL[c])),
+          h('option', { value: '__new__' }, '+ nouveau thème…')]),
+      h('button', { type: 'button', class: 'x', onclick: () => renameTheme($('#ms-cat').value) }, 'renommer'),
       h('select', { id: 'ms-agg', 'aria-label': 'Type', onfocus: onf, onblur: onb },
         Object.keys(AGG_LABEL).map((a) => h('option', { value: a, selected: a === m.agg ? true : null }, AGG_LABEL[a]))),
       h('button', { type: 'button', class: 'save', onclick: () => saveMetric(m.key) }, 'Enregistrer')),
@@ -1118,6 +1149,7 @@ setView(view);
 
 function render() {
   renderToday(); renderProjects(); renderSessions();
+  syncThemes();
   renderMeHead(); renderWeek(); renderGoals(); renderRhythm();
   if (!metricFormFocused) renderMetrics(); // on ne reconstruit pas le détail pendant une saisie
   renderJournal();

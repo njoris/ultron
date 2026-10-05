@@ -91,6 +91,8 @@ function loadDb() {
       process.exit(1); // on ne repart pas d'une base vide par-dessus des données existantes
     }
   }
+  // Fichier d'une version antérieure : on sème les thèmes par défaut une fois (schéma rétrocompatible).
+  if (!Array.isArray(db.themes)) db.themes = DEFAULT_THEMES.map((t) => ({ ...t }));
 }
 
 function saveDb() {
@@ -335,7 +337,15 @@ async function getSessions() {
 
 /* ───────────────────────── suivi perso ───────────────────────── */
 
-const CATEGORIES = ['corps', 'sport', 'sommeil', 'esprit', 'argent', 'autre'];
+// Thèmes : désormais des données (db.themes), pas une liste figée. Six par défaut ; on peut en créer d'autres,
+// à la main ou à la voix. « autre » reste le repli quand une mesure vise un thème inconnu.
+const DEFAULT_THEMES = [
+  { key: 'corps', label: 'Corps' }, { key: 'sport', label: 'Sport' }, { key: 'sommeil', label: 'Sommeil' },
+  { key: 'esprit', label: 'Esprit' }, { key: 'argent', label: 'Argent' }, { key: 'autre', label: 'Autre' },
+];
+const themeList = () => (Array.isArray(db.themes) && db.themes.length ? db.themes : DEFAULT_THEMES);
+const themeKeys = () => themeList().map((t) => t.key);
+const themeSlug = (s) => plain(s || '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 20);
 const noon = (key) => new Date(key + 'T12:00:00');
 function addDays(key, n) { const d = noon(key); d.setDate(d.getDate() + n); return dayKey(d); }
 const daysBetween = (a, b) => Math.round((noon(b) - noon(a)) / 864e5);
@@ -440,7 +450,7 @@ function buildTracking() {
     const fold = (xs) => (cumul ? xs.reduce((s, x) => s + x, 0) : avg(xs));
     const m = {
       key,
-      label: def.label, unit: def.unit, agg: def.agg, category: CATEGORIES.includes(def.category) ? def.category : 'autre',
+      label: def.label, unit: def.unit, agg: def.agg, category: themeKeys().includes(def.category) ? def.category : 'autre',
       smooth: !!def.smooth,
       points,
       latest,
@@ -482,7 +492,7 @@ function buildTracking() {
   }).map((m) => ({ key: m.key, label: m.label }));
 
   const todayEntries = db.entries.filter((e) => e.date === today).map((e) => ({ ...e, label: db.metrics[e.key]?.label || e.key, unit: db.metrics[e.key]?.unit || '', agg: db.metrics[e.key]?.agg }));
-  return { metrics, todayEntries, activity, logStreak: streaks([...counts.keys()], today), missingToday };
+  return { metrics, todayEntries, activity, logStreak: streaks([...counts.keys()], today), missingToday, themes: themeList() };
 }
 
 /* ───────────────────────── le cerveau : CLI claude ───────────────────────── */
@@ -498,7 +508,7 @@ Tu réponds TOUJOURS par un unique objet JSON, sans texte autour et sans bloc de
 
 Actions disponibles (tableau vide si aucune) :
 - {"type":"log_metric","key":"poids","label":"Poids","unit":"kg","agg":"last","category":"corps","value":80,"date":"AAAA-MM-JJ","note":""}
-  Enregistre une mesure. "key" : minuscules, chiffres et underscores. Réutilise une clé existante du contexte dès qu'elle correspond, sinon crée-la. "agg" : "last" pour un état ou une note qu'on relève (poids, tour de taille, heures de sommeil, humeur sur 5, argent de côté), "sum" pour ce qui se cumule sur une journée (kilomètres courus, pompes, pages lues, dépenses), "check" pour une habitude faite ou non dans la journée (méditation, étirements, pas d'écran après 22h) : dans ce cas "value" vaut 1 et "unit" reste vide. "category" : corps, sport, sommeil, esprit, argent ou autre. "date" : aujourd'hui par défaut ; convertis « hier », « lundi dernier »… à partir de la date du contexte.
+  Enregistre une mesure. "key" : minuscules, chiffres et underscores. Réutilise une clé existante du contexte dès qu'elle correspond, sinon crée-la. "agg" : "last" pour un état ou une note qu'on relève (poids, tour de taille, heures de sommeil, humeur sur 5, argent de côté), "sum" pour ce qui se cumule sur une journée (kilomètres courus, pompes, pages lues, dépenses), "check" pour une habitude faite ou non dans la journée (méditation, étirements, pas d'écran après 22h) : dans ce cas "value" vaut 1 et "unit" reste vide. "category" : un des thèmes listés dans le contexte (corps, sport, sommeil, esprit, argent, autre, plus ceux qu'il a créés) ; pour un nouveau thème, émets d'abord "add_theme". "date" : aujourd'hui par défaut ; convertis « hier », « lundi dernier »… à partir de la date du contexte.
 - {"type":"set_goal","key":"poids","label":"Poids","unit":"kg","agg":"last","kind":"reach","target":75,"deadline":"AAAA-MM-JJ"}
   Fixe un objectif. "kind":"reach" pour atteindre une valeur, "kind":"weekly" pour un total par semaine (ex. 15 km de course, ou méditer 5 fois). "deadline" est optionnelle. Un nouvel objectif du même type remplace l'ancien.
 - {"type":"add_note","text":"...","date":"AAAA-MM-JJ"}
@@ -511,6 +521,8 @@ Actions disponibles (tableau vide si aucune) :
   Oublie un fait de la mémoire, à partir de son id.
 - {"type":"show_view","view":"moi"}
   Affiche une vue du tableau de bord : "moi" (stats et objectifs perso) ou "travail" (projets et sessions). À utiliser quand il demande à voir l'une ou l'autre, ou quand ta réponse porte dessus et qu'il regarde l'autre.
+- {"type":"add_theme","key":"cuisine","label":"Cuisine"}
+  Crée un nouveau thème pour ranger des mesures, quand il le demande (« range ça dans un thème cuisine »). "key" en minuscules, chiffres et underscores. Émets cette action AVANT le "log_metric" qui l'utilise, et mets la même valeur dans "category".
 
 Bilan du jour : quand il le demande, pose une seule question à la fois, d'abord sur les mesures « pas encore saisies aujourd'hui » du contexte, enregistre chaque réponse au fur et à mesure, puis conclus en une phrase. S'il répond « je ne sais pas » ou « passe », passe à la suivante.
 
@@ -564,6 +576,7 @@ function buildContext(state) {
 
   out.push('\n## Suivi personnel');
   const tr = state.tracking;
+  if (tr.themes?.length) out.push(`Thèmes disponibles : ${tr.themes.map((t) => t.key).join(', ')}.`);
   if (!tr.metrics.length) out.push('Aucune mesure enregistrée pour l\'instant.');
   else {
     out.push(`Régularité : ${tr.logStreak.current} jours de saisie d'affilée (record ${tr.logStreak.best}).`);
@@ -691,7 +704,7 @@ function parseReply(text) {
 function ensureMetric(a) {
   const key = plain(a.key || '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
   if (!key) return null;
-  const category = CATEGORIES.includes(a.category) ? a.category : null;
+  const category = themeKeys().includes(a.category) ? a.category : null;
   if (!db.metrics[key]) {
     db.metrics[key] = {
       label: clip(String(a.label || key), 40),
@@ -711,6 +724,15 @@ function applyActions(actions) {
     if (!a || typeof a !== 'object') continue;
     if (a.type === 'show_view') {
       if (a.view === 'moi' || a.view === 'travail') applied.view = a.view;
+    } else if (a.type === 'add_theme') {
+      const key = themeSlug(a.key || a.label);
+      if (!key) continue;
+      if (!Array.isArray(db.themes)) db.themes = DEFAULT_THEMES.map((t) => ({ ...t }));
+      if (!db.themes.some((t) => t.key === key)) {
+        const label = clip(String(a.label || a.key || key).trim(), 24);
+        db.themes.push({ key, label });
+        applied.push({ type: 'add_theme', text: `Thème « ${label} » créé` });
+      }
     } else if (a.type === 'log_metric') {
       const habit = a.agg === 'check' || db.metrics[plain(a.key || '')]?.agg === 'check';
       const value = a.value == null && habit ? 1 : Number(a.value);
@@ -890,6 +912,33 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true, entry });
     }
 
+    // Thèmes : créer (manuel) ou renommer, sans passer par l'IA.
+    if (req.method === 'POST' && url.pathname === '/api/themes') {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      const key = themeSlug(body.key || body.label);
+      if (!key) return sendJson(res, 400, { error: 'Nom de thème invalide.' });
+      if (!Array.isArray(db.themes)) db.themes = DEFAULT_THEMES.map((t) => ({ ...t }));
+      if (db.themes.some((t) => t.key === key)) return sendJson(res, 409, { error: 'Ce thème existe déjà.' });
+      const theme = { key, label: clip(String(body.label || body.key || key).trim(), 24) };
+      db.themes.push(theme);
+      saveDb();
+      return sendJson(res, 200, { ok: true, theme });
+    }
+    const themeRoute = url.pathname.match(/^\/api\/themes\/([\w-]+)$/);
+    if (req.method === 'PATCH' && themeRoute) {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      if (!Array.isArray(db.themes)) db.themes = DEFAULT_THEMES.map((t) => ({ ...t }));
+      const theme = db.themes.find((t) => t.key === themeRoute[1]);
+      if (!theme) return sendJson(res, 404, { error: 'Thème inconnu.' });
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      if (typeof body.label === 'string' && body.label.trim()) theme.label = clip(body.label.trim(), 24);
+      saveDb();
+      return sendJson(res, 200, { ok: true });
+    }
+
     // Modifier une mesure : renommer, changer d'unité, de thème ou de type.
     const metricRoute = url.pathname.match(/^\/api\/metrics\/([\w-]+)$/);
     if (req.method === 'PATCH' && metricRoute) {
@@ -900,7 +949,7 @@ const server = http.createServer(async (req, res) => {
       try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
       if (typeof body.label === 'string' && body.label.trim()) def.label = clip(body.label.trim(), 40);
       if (typeof body.unit === 'string') def.unit = clip(body.unit.trim(), 12);
-      if (CATEGORIES.includes(body.category)) def.category = body.category;
+      if (themeKeys().includes(body.category)) def.category = body.category;
       if (['last', 'sum', 'check'].includes(body.agg)) def.agg = body.agg;
       if (typeof body.smooth === 'boolean') def.smooth = body.smooth;
       saveDb();

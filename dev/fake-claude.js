@@ -16,6 +16,14 @@ if (poids != null) { actions.push({ type: 'log_metric', key: 'poids', label: 'Po
 if (km != null) { actions.push({ type: 'log_metric', key: 'course', label: 'Course', unit: 'km', agg: 'sum', category: 'sport', value: km }); said.push(`${km} kilomètres`); }
 if (sommeil != null) { actions.push({ type: 'log_metric', key: 'sommeil', label: 'Sommeil', unit: 'h', agg: 'last', category: 'sommeil', value: sommeil }); said.push(`${sommeil} heures de sommeil`); }
 if (/m[ée]dit/i.test(msg)) { actions.push({ type: 'log_metric', key: 'meditation', label: 'Méditation', unit: '', agg: 'check', category: 'esprit' }); said.push('la méditation'); }
+// Thème : « crée un thème cuisine », « range ça dans un thème cuisine » → add_theme (avant les log_metric).
+const themeMatch = msg.match(/th[èe]me\s+([\p{L}]+)/iu);
+if (themeMatch) {
+  const label = themeMatch[1];
+  const key = label.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_');
+  actions.unshift({ type: 'add_theme', key, label: label[0].toUpperCase() + label.slice(1) });
+  said.push(`le thème ${label}`);
+}
 
 let say;
 if (actions.length) say = `C'est noté : ${said.join(', ')}.`;

@@ -63,7 +63,7 @@ Tu ne configures rien : chaque chose que tu dictes crée sa mesure, et l'IA choi
 - **Un cumul** (kilomètres, pompes, pages, dépenses) : total de la semaine, comparaison avec la semaine d'avant.
 - **Une habitude** faite ou non (méditation, lecture) : série en cours et 14 derniers jours.
 
-Les mesures sont rangées par thème : corps, sport, sommeil, esprit, argent.
+Les mesures sont rangées par thème : corps, sport, sommeil, esprit, argent (plus « autre »). Les thèmes sont personnalisables : tu peux en créer ou en renommer depuis le panneau « modifier » d'une mesure, ou en créer à la voix (« range le café dans un thème cuisine »).
 
 Pour un objectif du type « 75 kilos avant Noël », Ultron prolonge la tendance des 30 derniers jours et annonce une date d'arrivée, puis la compare à l'échéance. C'est une droite tracée sur tes mesures, pas une prédiction : avec moins de trois mesures sur cinq jours il ne donne pas de date, et si la tendance est plate ou dans le mauvais sens il le dit. Pour un objectif hebdomadaire, il compare ce qui est fait à ce qui devrait l'être à ce jour de la semaine.
 

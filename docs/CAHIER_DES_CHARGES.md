@@ -62,7 +62,7 @@ Chaque exigence a un état : **fait** (présent dans le code et testé en mode d
 | Id | Exigence | État |
 | --- | --- | --- |
 | M1 | Une phrase dictée (« je pèse 80 kilos, j'ai couru 3 km et médité ») crée ou alimente les mesures, sans configuration préalable. Une action par mesure. | fait |
-| M2 | Trois types de mesure : `last` (état relevé), `sum` (cumul sur la journée), `check` (habitude faite ou non). Six thèmes : corps, sport, sommeil, esprit, argent, autre. | fait |
+| M2 | Trois types de mesure : `last` (état relevé), `sum` (cumul sur la journée), `check` (habitude faite ou non). Thèmes personnalisables (six par défaut : corps, sport, sommeil, esprit, argent, autre), créés à la main ou à la voix. | fait |
 | M3 | Objectif `reach` (atteindre une valeur, échéance optionnelle) : progression, tendance sur 30 jours, date d'arrivée estimée, statut dans les temps / en retard / à l'arrêt. Pas de date avec moins de 3 mesures sur 5 jours. | fait |
 | M4 | Objectif `weekly` (total par semaine, lundi à dimanche) : comparaison avec ce qui devrait être fait à ce jour de la semaine. | fait |
 | M5 | Régularité : grille de 12 semaines, série de jours consécutifs en cours et record. | fait |
@@ -142,7 +142,7 @@ Le prompt contient `<contexte>` (date, Trello, sessions, suivi, mémoire, notes)
 { "say": "ce qu'Ultron dit à voix haute", "actions": [] }
 ```
 
-Actions acceptées, toute autre étant ignorée : `log_metric`, `set_goal`, `add_note`, `delete_entry`, `remember`, `forget`, `show_view`. Le détail des champs est dans `SYSTEM_PROMPT` (`server.js`), qui fait foi. Une réponse qui n'est pas du JSON est dite telle quelle, sans action.
+Actions acceptées, toute autre étant ignorée : `log_metric`, `set_goal`, `add_note`, `delete_entry`, `remember`, `forget`, `show_view`, `add_theme`. Le détail des champs est dans `SYSTEM_PROMPT` (`server.js`), qui fait foi. Une réponse qui n'est pas du JSON est dite telle quelle, sans action.
 
 ### 6.5 État d'une session Claude Code
 

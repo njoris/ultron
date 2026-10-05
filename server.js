@@ -602,6 +602,19 @@ function buildContext(state) {
   return out.join('\n');
 }
 
+// Environnement passé à la CLI. On en retire toute variable qui ferait basculer la facturation
+// vers l'API (ANTHROPIC_*, CLAUDE_CODE_*, CLAUDECODE), sauf si l'utilisateur l'autorise explicitement.
+// Fonction pure (copie superficielle) pour pouvoir la tester sans lancer de process.
+function claudeEnv(baseEnv = process.env, useApiKey = CFG.useApiKey) {
+  const env = { ...baseEnv };
+  if (!useApiKey) {
+    for (const k of Object.keys(env)) {
+      if (k.startsWith('ANTHROPIC_') || k.startsWith('CLAUDE_CODE_') || k === 'CLAUDECODE') delete env[k];
+    }
+  }
+  return env;
+}
+
 function runClaude(prompt) {
   return new Promise((resolve, reject) => {
     const win = process.platform === 'win32';
@@ -616,14 +629,7 @@ function runClaude(prompt) {
     ];
     if (CFG.claudeModel) args.push('--model', CFG.claudeModel);
 
-    const env = { ...process.env };
-    // La CLI préfère une clé ANTHROPIC_API_KEY héritée à ton login, sans prévenir : la facturation
-    // passerait sur l'API. On retire donc toutes ces variables avant de lancer le cerveau.
-    if (!CFG.useApiKey) {
-      for (const k of Object.keys(env)) {
-        if (k.startsWith('ANTHROPIC_') || k.startsWith('CLAUDE_CODE_') || k === 'CLAUDECODE') delete env[k];
-      }
-    }
+    const env = claudeEnv();
 
     let child;
     try {
@@ -902,7 +908,7 @@ if (require.main === module) start();
 // Exposé pour les tests. __setDb/__getDb donnent accès à l'état en mémoire sans toucher à data/.
 module.exports = {
   listStatus, slopePerDay, streaks, evalGoal, applyActions, parseReply, isLocalRequest,
-  addDays, CFG,
+  claudeEnv, addDays, CFG,
   __setDb: (next) => { db = next; },
   __getDb: () => db,
 };

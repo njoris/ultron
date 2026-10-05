@@ -154,6 +154,29 @@ function listStatus(name) {
   return 'todo';
 }
 
+// Sprint courant d'un tableau : d'après les étiquettes « Sprint N », le plus récent non terminé
+// (ou le plus récent tout court s'ils sont tous finis). null si aucune étiquette de sprint.
+function currentSprint(cards) {
+  const byN = new Map();
+  for (const c of cards) {
+    for (const name of c.labels || []) {
+      const m = /sprint\s*(\d+)/i.exec(name);
+      if (!m) continue;
+      const n = Number(m[1]);
+      const s = byN.get(n) || { done: 0, total: 0 };
+      s.total++;
+      if (c.status === 'done') s.done++;
+      byN.set(n, s);
+    }
+  }
+  if (!byN.size) return null;
+  const ns = [...byN.keys()].sort((a, b) => a - b);
+  const open = ns.filter((n) => byN.get(n).done < byN.get(n).total);
+  const n = open.length ? open[open.length - 1] : ns[ns.length - 1];
+  const s = byN.get(n);
+  return { n, label: `Sprint ${n}`, done: s.done, total: s.total, progress: s.total ? s.done / s.total : 0 };
+}
+
 async function getTrello(force = false) {
   if (!CFG.trelloKey || !CFG.trelloToken) return { configured: false, boards: [] };
   if (!force && trelloCache.data && Date.now() - trelloCache.at < 60_000) return trelloCache.data;
@@ -205,6 +228,7 @@ async function getTrello(force = false) {
         counts,
         total,
         progress: total ? counts.done / total : 0,
+        sprint: currentSprint(outLists.flatMap((l) => l.cards)),
         lists: outLists,
       };
     }));
@@ -1063,7 +1087,7 @@ if (require.main === module) start();
 
 // Exposé pour les tests. __setDb/__getDb donnent accès à l'état en mémoire sans toucher à data/.
 module.exports = {
-  listStatus, slopePerDay, streaks, evalGoal, applyActions, parseReply, isLocalRequest,
+  listStatus, currentSprint, slopePerDay, streaks, evalGoal, applyActions, parseReply, isLocalRequest,
   claudeEnv, entriesToCsv, addDays, CFG,
   __setDb: (next) => { db = next; },
   __getDb: () => db,

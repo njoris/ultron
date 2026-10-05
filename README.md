@@ -31,7 +31,7 @@ Pour continuer le développement avec Claude Code : le besoin et la feuille de r
 2. Dans l'onglet « Clé API », génère la clé : c'est `TRELLO_KEY`.
 3. Sur la même page, clique sur le lien « Jeton » pour t'en créer un à la main et autorise l'accès : c'est `TRELLO_TOKEN`.
 
-Ultron lit seulement. Les colonnes sont classées par leur nom : « terminer / done / fini » comptent comme terminé, « Q&A / review / test » comme en revue, « en cours / doing » comme en cours, tout le reste comme à faire. Les étiquettes (par exemple « Sprint 3 ») sont affichées à côté des tickets et transmises à l'IA. Pour changer ces règles : fonction `listStatus` dans `server.js`.
+Ultron lit seulement. Les colonnes sont classées par leur nom : « terminer / done / fini » comptent comme terminé, « Q&A / review / test » comme en revue, « en cours / doing » comme en cours, tout le reste comme à faire. Les étiquettes (par exemple « Sprint 3 ») sont affichées à côté des tickets et transmises à l'IA. Celles de la forme « Sprint N » servent aussi à afficher, par projet, l'avancement du sprint courant (le plus récent non terminé). Pour changer ces règles : fonctions `listStatus` et `currentSprint` dans `server.js`.
 
 ## Lui parler
 

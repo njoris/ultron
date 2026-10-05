@@ -220,6 +220,7 @@
   .entry-list .rows li.editing { outline: 1px solid var(--mint); outline-offset: 3px; border-radius: 4px; }
   a.export { color: var(--mint); font-size: 13px; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
   a.export:hover { background: var(--steel-700); }
+  .proj .sprint { display: inline-block; margin-left: 8px; font-size: 12px; color: var(--mint); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; vertical-align: middle; }
 
   @media (max-width: 1180px) { .view { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 820px) {
@@ -742,7 +743,9 @@ function renderProjects() {
       const id = 'todo-' + b.id;
       kids.push(h('article', { class: 'proj' },
         h('header', null, h('a', { href: b.url, target: '_blank', rel: 'noopener' }, b.name),
-          h('span', { class: 'sub' }, b.total ? `${b.counts.done} sur ${b.total} terminés` : 'aucun ticket')),
+          h('span', { class: 'sub' }, b.total ? `${b.counts.done} sur ${b.total} terminés` : 'aucun ticket'),
+          b.sprint ? h('span', { class: 'sprint', title: `${b.sprint.done}/${b.sprint.total} tickets du ${b.sprint.label} terminés` },
+            `${b.sprint.label} · ${b.sprint.done}/${b.sprint.total} (${Math.round(b.sprint.progress * 100)} %)`) : null),
         b.total ? h('div', { class: 'bar', role: 'img', 'aria-label': `${b.counts.done} terminés, ${b.counts.review} en revue, ${b.counts.doing} en cours, ${b.counts.todo} à faire` },
           ['done', 'review', 'doing', 'todo'].map((s) => b.counts[s] ? h('i', { class: 's-' + s, style: `flex:${b.counts[s]}` }) : null)) : null,
         active.length ? h('ul', { class: 'tickets' }, active.map((c) => ticket(c))) : null,

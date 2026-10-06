@@ -33,15 +33,20 @@ const CFG = {
   claudeHome: process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude'),
   sessionHours: Number(process.env.SESSION_HOURS) || 72,
   useApiKey: process.env.ULTRON_USE_API_KEY === '1',
+  stream: process.env.ULTRON_STREAM === '1', // S4 : process claude persistant + réponse en flux (opt-in)
+  ttsUrl: process.env.ULTRON_TTS_URL || '',  // S4-3 : service de synthèse externe (optionnel), sinon voix du navigateur
+  ttsKey: process.env.ULTRON_TTS_KEY || '',
+  ttsVoice: process.env.ULTRON_TTS_VOICE || '',
+  usageCmd: process.env.ULTRON_USAGE_CMD || '', // S5-3 : commande qui imprime l'usage de l'abonnement en JSON
+  agent: process.env.ULTRON_AGENT === '1', // S5-1/S5-2 : lancer de vraies tâches claude (opt-in, désactivé par défaut)
 };
 
 const DATA_DIR = process.env.ULTRON_DATA_DIR ? path.resolve(process.env.ULTRON_DATA_DIR) : path.join(ROOT, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'ultron.json');
+const BACKUP_DIR = path.join(DATA_DIR, 'backups'); // copies datées de ultron.json (7 gardées)
 const AI_CWD = path.join(DATA_DIR, 'ai-cwd'); // dossier vide : aucun CLAUDE.md n'est chargé
 const SYS_FILE = path.join(DATA_DIR, 'system-prompt.txt');
 const PUBLIC_DIR = path.join(ROOT, 'public');
-
-fs.mkdirSync(AI_CWD, { recursive: true });
 
 /* ───────────────────────── utilitaires ───────────────────────── */
 
@@ -93,28 +98,64 @@ function loadDb() {
       process.exit(1); // on ne repart pas d'une base vide par-dessus des données existantes
     }
   }
+  // Fichier d'une version antérieure : on sème les thèmes par défaut une fois (schéma rétrocompatible).
+  if (!Array.isArray(db.themes)) db.themes = DEFAULT_THEMES.map((t) => ({ ...t }));
 }
 
 function saveDb() {
   const tmp = DATA_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
   fs.renameSync(tmp, DATA_FILE);
+  backupDb();
+}
+
+// Copie datée de ultron.json, une fois par jour, sept copies gardées. Ne jette jamais : une sauvegarde
+// ratée ne doit pas bloquer l'enregistrement.
+function backupDb() {
+  try {
+    if (!fs.existsSync(DATA_FILE)) return;
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const dest = path.join(BACKUP_DIR, `ultron-${dayKey()}.json`);
+    if (!fs.existsSync(dest)) fs.copyFileSync(DATA_FILE, dest);
+    const files = fs.readdirSync(BACKUP_DIR).filter((f) => /^ultron-\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
+    for (const f of files.slice(0, -7)) fs.unlinkSync(path.join(BACKUP_DIR, f)); // on ne garde que les 7 plus récentes
+  } catch (e) {
+    console.error(`Sauvegarde impossible : ${e.message}`);
+  }
+}
+
+// Export CSV des mesures. Fonction pure (testable) : une ligne d'en-tête puis une ligne par entrée.
+function entriesToCsv(database) {
+  const esc = (v) => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const rows = [['date', 'cle', 'mesure', 'valeur', 'unite', 'note', 'type', 'theme']];
+  const entries = database.entries.slice().sort((a, b) => a.date.localeCompare(b.date) || String(a.ts).localeCompare(String(b.ts)));
+  for (const e of entries) {
+    const m = database.metrics[e.key] || {};
+    rows.push([e.date, e.key, m.label || e.key, e.value, m.unit || '', e.note || '', m.agg || '', m.category || '']);
+  }
+  return '﻿' + rows.map((r) => r.map(esc).join(',')).join('\r\n'); // BOM : Excel ouvre en UTF-8
 }
 
 /* ───────────────────────── Trello ───────────────────────── */
 
 let trelloCache = { at: 0, data: null };
 
-async function trelloGet(route, params) {
+async function trelloRequest(method, route, params) {
   const url = new URL(CFG.trelloApi + route);
   for (const [k, v] of Object.entries({ ...params, key: CFG.trelloKey, token: CFG.trelloToken })) {
     url.searchParams.set(k, v);
   }
-  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-  if (res.status === 401) throw new Error('Trello refuse la clé ou le jeton. Vérifie TRELLO_KEY et TRELLO_TOKEN dans .env.');
+  const res = await fetch(url, { method, signal: AbortSignal.timeout(15000) });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(method === 'GET'
+      ? 'Trello refuse la clé ou le jeton. Vérifie TRELLO_KEY et TRELLO_TOKEN dans .env.'
+      : 'Trello refuse l\'écriture : il faut un jeton avec droit d\'écriture (voir README, « Agir sur Trello »).');
+  }
   if (!res.ok) throw new Error(`Trello a répondu ${res.status} sur ${route}.`);
   return res.json();
 }
+
+const trelloGet = (route, params) => trelloRequest('GET', route, params);
 
 // Colonnes → statut. Calé sur « À faire / En cours / Q&A / Terminer », avec les variantes courantes.
 function listStatus(name) {
@@ -123,6 +164,29 @@ function listStatus(name) {
   if (/(q&a|q & a|\bqa\b|review|revue|test|recette|valid)/.test(n)) return 'review';
   if (/(en cours|doing|progress|\bwip\b)/.test(n)) return 'doing';
   return 'todo';
+}
+
+// Sprint courant d'un tableau : d'après les étiquettes « Sprint N », le plus récent non terminé
+// (ou le plus récent tout court s'ils sont tous finis). null si aucune étiquette de sprint.
+function currentSprint(cards) {
+  const byN = new Map();
+  for (const c of cards) {
+    for (const name of c.labels || []) {
+      const m = /sprint\s*(\d+)/i.exec(name);
+      if (!m) continue;
+      const n = Number(m[1]);
+      const s = byN.get(n) || { done: 0, total: 0 };
+      s.total++;
+      if (c.status === 'done') s.done++;
+      byN.set(n, s);
+    }
+  }
+  if (!byN.size) return null;
+  const ns = [...byN.keys()].sort((a, b) => a - b);
+  const open = ns.filter((n) => byN.get(n).done < byN.get(n).total);
+  const n = open.length ? open[open.length - 1] : ns[ns.length - 1];
+  const s = byN.get(n);
+  return { n, label: `Sprint ${n}`, done: s.done, total: s.total, progress: s.total ? s.done / s.total : 0 };
 }
 
 async function getTrello(force = false) {
@@ -176,6 +240,7 @@ async function getTrello(force = false) {
         counts,
         total,
         progress: total ? counts.done / total : 0,
+        sprint: currentSprint(outLists.flatMap((l) => l.cards)),
         lists: outLists,
       };
     }));
@@ -337,7 +402,15 @@ async function getSessions() {
 
 /* ───────────────────────── suivi perso ───────────────────────── */
 
-const CATEGORIES = ['corps', 'sport', 'sommeil', 'esprit', 'argent', 'autre'];
+// Thèmes : désormais des données (db.themes), pas une liste figée. Six par défaut ; on peut en créer d'autres,
+// à la main ou à la voix. « autre » reste le repli quand une mesure vise un thème inconnu.
+const DEFAULT_THEMES = [
+  { key: 'corps', label: 'Corps' }, { key: 'sport', label: 'Sport' }, { key: 'sommeil', label: 'Sommeil' },
+  { key: 'esprit', label: 'Esprit' }, { key: 'argent', label: 'Argent' }, { key: 'autre', label: 'Autre' },
+];
+const themeList = () => (Array.isArray(db.themes) && db.themes.length ? db.themes : DEFAULT_THEMES);
+const themeKeys = () => themeList().map((t) => t.key);
+const themeSlug = (s) => plain(s || '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 20);
 const noon = (key) => new Date(key + 'T12:00:00');
 function addDays(key, n) { const d = noon(key); d.setDate(d.getDate() + n); return dayKey(d); }
 const daysBetween = (a, b) => Math.round((noon(b) - noon(a)) / 864e5);
@@ -397,7 +470,9 @@ function evalGoal(goal, m, today) {
     };
   }
   const points = m.points;
-  const current = points.length ? points[points.length - 1].value : null;
+  const lastValue = points.length ? points[points.length - 1].value : null;
+  // Réglage par mesure : lisser la progression sur la moyenne 7 jours plutôt que sur la dernière valeur.
+  const current = m.smooth && m.agg === 'last' && m.avg7 != null ? m.avg7 : lastValue;
   if (current == null) return { current: null, pct: 0, reached: false, status: 'unknown', text: 'Aucune mesure pour l\'instant.' };
   const start = goal.start ?? points.find((p) => p.date >= goal.createdAt.slice(0, 10))?.value ?? current;
   const down = goal.target < start;
@@ -440,7 +515,8 @@ function buildTracking() {
     const fold = (xs) => (cumul ? xs.reduce((s, x) => s + x, 0) : avg(xs));
     const m = {
       key,
-      label: def.label, unit: def.unit, agg: def.agg, category: CATEGORIES.includes(def.category) ? def.category : 'autre',
+      label: def.label, unit: def.unit, agg: def.agg, category: themeKeys().includes(def.category) ? def.category : 'autre',
+      smooth: !!def.smooth,
       points,
       latest,
       delta: latest && prev ? latest.value - prev.value : null,
@@ -457,6 +533,10 @@ function buildTracking() {
     };
     m.weekTotal = m.week; // nom historique, encore lu par l'interface
     m.goals = db.goals.filter((g) => g.key === key).map((g) => ({ ...g, ...evalGoal(g, m, today) }));
+    // Entrées brutes (60 dernières), pour corriger une valeur à la main depuis le détail.
+    m.rawEntries = db.entries.filter((e) => e.key === key)
+      .map((e) => ({ id: e.id, date: e.date, value: e.value, note: e.note || '' }))
+      .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60);
     return m;
   });
   metrics.sort((a, b) => String(b.latest?.date || '').localeCompare(String(a.latest?.date || '')));
@@ -477,7 +557,7 @@ function buildTracking() {
   }).map((m) => ({ key: m.key, label: m.label }));
 
   const todayEntries = db.entries.filter((e) => e.date === today).map((e) => ({ ...e, label: db.metrics[e.key]?.label || e.key, unit: db.metrics[e.key]?.unit || '', agg: db.metrics[e.key]?.agg }));
-  return { metrics, todayEntries, activity, logStreak: streaks([...counts.keys()], today), missingToday };
+  return { metrics, todayEntries, activity, logStreak: streaks([...counts.keys()], today), missingToday, themes: themeList() };
 }
 
 /* ───────────────────────── le cerveau : CLI claude ───────────────────────── */
@@ -493,7 +573,7 @@ Tu réponds TOUJOURS par un unique objet JSON, sans texte autour et sans bloc de
 
 Actions disponibles (tableau vide si aucune) :
 - {"type":"log_metric","key":"poids","label":"Poids","unit":"kg","agg":"last","category":"corps","value":80,"date":"AAAA-MM-JJ","note":""}
-  Enregistre une mesure. "key" : minuscules, chiffres et underscores. Réutilise une clé existante du contexte dès qu'elle correspond, sinon crée-la. "agg" : "last" pour un état ou une note qu'on relève (poids, tour de taille, heures de sommeil, humeur sur 5, argent de côté), "sum" pour ce qui se cumule sur une journée (kilomètres courus, pompes, pages lues, dépenses), "check" pour une habitude faite ou non dans la journée (méditation, étirements, pas d'écran après 22h) : dans ce cas "value" vaut 1 et "unit" reste vide. "category" : corps, sport, sommeil, esprit, argent ou autre. "date" : aujourd'hui par défaut ; convertis « hier », « lundi dernier »… à partir de la date du contexte.
+  Enregistre une mesure. "key" : minuscules, chiffres et underscores. Réutilise une clé existante du contexte dès qu'elle correspond, sinon crée-la. "agg" : "last" pour un état ou une note qu'on relève (poids, tour de taille, heures de sommeil, humeur sur 5, argent de côté), "sum" pour ce qui se cumule sur une journée (kilomètres courus, pompes, pages lues, dépenses), "check" pour une habitude faite ou non dans la journée (méditation, étirements, pas d'écran après 22h) : dans ce cas "value" vaut 1 et "unit" reste vide. "category" : un des thèmes listés dans le contexte (corps, sport, sommeil, esprit, argent, autre, plus ceux qu'il a créés) ; pour un nouveau thème, émets d'abord "add_theme". "date" : aujourd'hui par défaut ; convertis « hier », « lundi dernier »… à partir de la date du contexte.
 - {"type":"set_goal","key":"poids","label":"Poids","unit":"kg","agg":"last","kind":"reach","target":75,"deadline":"AAAA-MM-JJ"}
   Fixe un objectif. "kind":"reach" pour atteindre une valeur, "kind":"weekly" pour un total par semaine (ex. 15 km de course, ou méditer 5 fois). "deadline" est optionnelle. Un nouvel objectif du même type remplace l'ancien.
 - {"type":"add_note","text":"...","date":"AAAA-MM-JJ"}
@@ -506,6 +586,15 @@ Actions disponibles (tableau vide si aucune) :
   Oublie un fait de la mémoire, à partir de son id.
 - {"type":"show_view","view":"moi"}
   Affiche une vue du tableau de bord : "moi" (stats et objectifs perso) ou "travail" (projets et sessions). À utiliser quand il demande à voir l'une ou l'autre, ou quand ta réponse porte dessus et qu'il regarde l'autre.
+- {"type":"add_theme","key":"cuisine","label":"Cuisine"}
+  Crée un nouveau thème pour ranger des mesures, quand il le demande (« range ça dans un thème cuisine »). "key" en minuscules, chiffres et underscores. Émets cette action AVANT le "log_metric" qui l'utilise, et mets la même valeur dans "category".
+- {"type":"trello_move","board":"Homepedia","card":"Page de connexion","toList":"En cours"}
+  Déplace un ticket Trello vers une autre colonne. "board", "card" et "toList" sont les noms exacts vus dans le contexte.
+- {"type":"trello_create","board":"Homepedia","list":"À faire","name":"Corriger le lien de login","desc":""}
+  Crée un ticket Trello dans une colonne.
+  ÉCRITURE DANS TRELLO — règle stricte : ne JAMAIS émettre trello_move ni trello_create sans avoir d'abord reformulé l'action et obtenu un « oui » explicite dans le message en cours. À la première demande, tu ne fais que décrire ce que tu vas faire et tu poses la question ; tu n'émets l'action qu'au tour suivant, une fois la confirmation reçue. N'invente jamais un nom de tableau, de carte ou de colonne absent du contexte.
+- {"type":"launch_task","project":"Homepedia","prompt":"ajoute un test pour la pagination"}
+  Lance une vraie tâche Claude Code dans le dossier du projet (« lance sur Homepedia : … »). MÊME RÈGLE STRICTE que pour Trello : reformule la tâche et obtiens un « oui » explicite avant d'émettre l'action ; jamais au premier message. Cette tâche modifie un dépôt et consomme l'abonnement.
 
 Bilan du jour : quand il le demande, pose une seule question à la fois, d'abord sur les mesures « pas encore saisies aujourd'hui » du contexte, enregistre chaque réponse au fur et à mesure, puis conclus en une phrase. S'il répond « je ne sais pas » ou « passe », passe à la suivante.
 
@@ -517,8 +606,6 @@ Règles pour les actions :
 - Convertis les unités vers celle de la mesure existante (5000 mètres → 5 km).
 - Si une valeur est ambiguë ou manifestement mal transcrite par la reconnaissance vocale (« je pèse 800 kilos »), n'enregistre rien et demande confirmation.
 - Quand tu enregistres, confirme en une phrase avec les valeurs, et ajoute si c'est pertinent où il en est par rapport à son objectif ou à la mesure précédente.`;
-
-fs.writeFileSync(SYS_FILE, SYSTEM_PROMPT);
 
 function buildContext(state) {
   const now = new Date();
@@ -561,6 +648,7 @@ function buildContext(state) {
 
   out.push('\n## Suivi personnel');
   const tr = state.tracking;
+  if (tr.themes?.length) out.push(`Thèmes disponibles : ${tr.themes.map((t) => t.key).join(', ')}.`);
   if (!tr.metrics.length) out.push('Aucune mesure enregistrée pour l\'instant.');
   else {
     out.push(`Régularité : ${tr.logStreak.current} jours de saisie d'affilée (record ${tr.logStreak.best}).`);
@@ -606,6 +694,19 @@ function buildContext(state) {
   return out.join('\n');
 }
 
+// Environnement passé à la CLI. On en retire toute variable qui ferait basculer la facturation
+// vers l'API (ANTHROPIC_*, CLAUDE_CODE_*, CLAUDECODE), sauf si l'utilisateur l'autorise explicitement.
+// Fonction pure (copie superficielle) pour pouvoir la tester sans lancer de process.
+function claudeEnv(baseEnv = process.env, useApiKey = CFG.useApiKey) {
+  const env = { ...baseEnv };
+  if (!useApiKey) {
+    for (const k of Object.keys(env)) {
+      if (k.startsWith('ANTHROPIC_') || k.startsWith('CLAUDE_CODE_') || k === 'CLAUDECODE') delete env[k];
+    }
+  }
+  return env;
+}
+
 function runClaude(prompt) {
   return new Promise((resolve, reject) => {
     const win = process.platform === 'win32';
@@ -620,14 +721,7 @@ function runClaude(prompt) {
     ];
     if (CFG.claudeModel) args.push('--model', CFG.claudeModel);
 
-    const env = { ...process.env };
-    // La CLI préfère une clé ANTHROPIC_API_KEY héritée à ton login, sans prévenir : la facturation
-    // passerait sur l'API. On retire donc toutes ces variables avant de lancer le cerveau.
-    if (!CFG.useApiKey) {
-      for (const k of Object.keys(env)) {
-        if (k.startsWith('ANTHROPIC_') || k.startsWith('CLAUDE_CODE_') || k === 'CLAUDECODE') delete env[k];
-      }
-    }
+    const env = claudeEnv();
 
     let child;
     try {
@@ -664,6 +758,83 @@ function runClaude(prompt) {
   });
 }
 
+/* ── S4-1/S4-2 : process claude persistant + réponse en flux (opt-in ULTRON_STREAM=1) ──
+   On garde un seul process ouvert en --input-format/-output-format stream-json ; chaque question
+   est une ligne JSON sur stdin, la réponse arrive en événements. Repli sur runClaude en cas d'échec. */
+let streamChild = null;
+
+// Événement stream-json → { delta } (morceau de texte) ou { done, result } (fin de réponse).
+function streamEvent(obj) {
+  if (!obj || typeof obj !== 'object') return {};
+  if (obj.type === 'stream_event') {
+    const d = obj.event && obj.event.delta;
+    if (d && d.type === 'text_delta' && typeof d.text === 'string') return { delta: d.text };
+    return {};
+  }
+  if (obj.type === 'result') return { done: true, result: typeof obj.result === 'string' ? obj.result : '' };
+  return {};
+}
+
+function streamClaudeArgs() {
+  const win = process.platform === 'win32';
+  const q = (s) => (win ? `"${s}"` : s);
+  const args = ['-p', '--output-format', 'stream-json', '--input-format', 'stream-json',
+    '--include-partial-messages', '--verbose',
+    '--system-prompt-file', q(SYS_FILE),
+    '--no-session-persistence', '--strict-mcp-config', '--tools', win ? '""' : ''];
+  if (CFG.claudeModel) args.push('--model', CFG.claudeModel);
+  return args;
+}
+
+function ensureStreamChild() {
+  if (streamChild && !streamChild.killed) return streamChild;
+  const win = process.platform === 'win32';
+  const child = spawn(CFG.claudeBin, streamClaudeArgs(), { cwd: AI_CWD, env: claudeEnv(), shell: win, windowsHide: true });
+  child.stdin.on('error', () => {});
+  const drop = () => { if (streamChild === child) streamChild = null; };
+  child.on('exit', drop);
+  child.on('error', drop);
+  let buf = '';
+  child.stdout.on('data', (d) => {
+    buf += d;
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line && child.onLine) child.onLine(line);
+    }
+  });
+  streamChild = child;
+  return child;
+}
+
+// Envoie un prompt au process persistant ; onDelta reçoit chaque morceau de texte au fil de l'eau.
+function runClaudeStream(prompt, onDelta) {
+  return new Promise((resolve, reject) => {
+    let child;
+    try { child = ensureStreamChild(); } catch (e) { return reject(e); }
+    let acc = '';
+    const cleanup = () => { clearTimeout(timer); child.onLine = null; };
+    const timer = setTimeout(() => {
+      cleanup();
+      try { child.kill(); } catch { /* déjà mort */ }
+      streamChild = null;
+      reject(new Error('Claude n\'a pas répondu en 2 minutes. Réessaie.'));
+    }, 120_000);
+    child.onLine = (line) => {
+      let obj;
+      try { obj = JSON.parse(line); } catch { return; }
+      const ev = streamEvent(obj);
+      if (ev.delta) { acc += ev.delta; if (onDelta) onDelta(ev.delta, acc); }
+      if (ev.done) { cleanup(); resolve(ev.result || acc); }
+    };
+    child.on('error', (e) => { cleanup(); reject(e); });
+    try {
+      child.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: prompt }] } }) + '\n');
+    } catch (e) { cleanup(); reject(e); }
+  });
+}
+
 function parseReply(text) {
   const candidates = [text.trim()];
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -682,7 +853,7 @@ function parseReply(text) {
 function ensureMetric(a) {
   const key = plain(a.key || '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
   if (!key) return null;
-  const category = CATEGORIES.includes(a.category) ? a.category : null;
+  const category = themeKeys().includes(a.category) ? a.category : null;
   if (!db.metrics[key]) {
     db.metrics[key] = {
       label: clip(String(a.label || key), 40),
@@ -702,6 +873,15 @@ function applyActions(actions) {
     if (!a || typeof a !== 'object') continue;
     if (a.type === 'show_view') {
       if (a.view === 'moi' || a.view === 'travail') applied.view = a.view;
+    } else if (a.type === 'add_theme') {
+      const key = themeSlug(a.key || a.label);
+      if (!key) continue;
+      if (!Array.isArray(db.themes)) db.themes = DEFAULT_THEMES.map((t) => ({ ...t }));
+      if (!db.themes.some((t) => t.key === key)) {
+        const label = clip(String(a.label || a.key || key).trim(), 24);
+        db.themes.push({ key, label });
+        applied.push({ type: 'add_theme', text: `Thème « ${label} » créé` });
+      }
     } else if (a.type === 'log_metric') {
       const habit = a.agg === 'check' || db.metrics[plain(a.key || '')]?.agg === 'check';
       const value = a.value == null && habit ? 1 : Number(a.value);
@@ -755,13 +935,107 @@ function applyActions(actions) {
 let aiBusy = false;
 let aiLastError = null;
 
-async function chat(message) {
+// Écritures Trello proposées par l'IA (après confirmation orale). On résout les noms en identifiants
+// à partir des données déjà lues, puis on écrit. Jamais appelé sans que l'IA ait demandé confirmation.
+async function applyTrello(actions) {
+  const ops = actions.filter((a) => a && (a.type === 'trello_create' || a.type === 'trello_move'));
+  if (!ops.length) return [];
+  const data = await getTrello();
+  const boards = data.boards || [];
+  const findBoard = (name) => boards.find((b) => plain(b.name) === plain(name || '')) || (boards.length === 1 ? boards[0] : null);
+  const findList = (b, name) => b.lists.find((l) => plain(l.name) === plain(name || '')) || b.lists.find((l) => listStatus(l.name) === listStatus(name || ''));
+  const applied = [];
+  for (const a of ops.slice(0, 4)) {
+    try {
+      const b = findBoard(a.board);
+      if (!b) { applied.push({ type: 'trello', text: `Tableau « ${a.board || '?'} » introuvable.` }); continue; }
+      if (a.type === 'trello_create') {
+        const list = findList(b, a.list) || b.lists.find((l) => l.status === 'todo') || b.lists[0];
+        const name = clip(String(a.name || '').trim(), 300);
+        if (!list || !name) { applied.push({ type: 'trello', text: 'Il me manque la liste ou le nom de la carte.' }); continue; }
+        await trelloRequest('POST', '/cards', { idList: list.id, name, desc: clip(String(a.desc || ''), 1000) });
+        applied.push({ type: 'trello', text: `Carte « ${clip(name, 60)} » créée dans ${b.name} / ${list.name}` });
+      } else {
+        const cards = b.lists.flatMap((l) => l.cards);
+        const card = cards.find((c) => plain(c.name) === plain(a.card || '')) || cards.find((c) => plain(a.card || '') && plain(c.name).includes(plain(a.card)));
+        const list = findList(b, a.toList);
+        if (!card || !list) { applied.push({ type: 'trello', text: 'Carte ou liste de destination introuvable.' }); continue; }
+        await trelloRequest('PUT', `/cards/${card.id}`, { idList: list.id });
+        applied.push({ type: 'trello', text: `« ${clip(card.name, 60)} » déplacée vers ${list.name} (${b.name})` });
+      }
+      trelloCache = { at: 0, data: null }; // l'écriture change l'état : on forcera une relecture
+    } catch (e) {
+      applied.push({ type: 'trello', text: e.message });
+    }
+  }
+  return applied;
+}
+
+/* ── S5-1/S5-2 : lancer et suivre de vraies tâches claude (opt-in ULTRON_AGENT=1) ──
+   Désactivé par défaut. Chaque lancement agit sur un dépôt et consomme l'abonnement :
+   l'IA doit confirmer oralement avant d'émettre launch_task. */
+let tasks = [];
+
+// Dossier d'un projet : on le déduit d'une session Claude Code récente du même nom (voir S3-2).
+async function resolveProjectDir(project) {
+  const s = await getSessions();
+  const p = plain(project || '');
+  if (!p) return null;
+  const hit = (s.items || []).find((x) => x.cwd && plain(path.basename(x.cwd)) === p);
+  return hit ? hit.cwd : null;
+}
+
+function launchTask(project, prompt, cwd) {
+  const win = process.platform === 'win32';
+  const task = { id: uid(), project, prompt: clip(String(prompt || ''), 500), cwd, state: 'running', startedAt: new Date().toISOString(), endedAt: null, result: '' };
+  tasks.unshift(task);
+  tasks = tasks.slice(0, 20);
+  let out = '', err = '';
+  let child;
+  try {
+    child = spawn(CFG.claudeBin, ['-p', String(prompt || '')], { cwd, env: claudeEnv(), shell: win, windowsHide: true });
+  } catch (e) {
+    task.state = 'error'; task.endedAt = new Date().toISOString(); task.result = e.message;
+    return task;
+  }
+  const finish = (state, text) => { if (task.state === 'running') { task.state = state; task.endedAt = new Date().toISOString(); task.result = clip(String(text || '').trim(), 1000); } };
+  child.stdin.on('error', () => {});
+  child.stdin.end(); // le prompt est passé en argument ; on ferme l'entrée pour ne rien faire attendre
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { err += d; });
+  child.on('error', (e) => finish('error', e.code === 'ENOENT' ? `Commande « ${CFG.claudeBin} » introuvable` : e.message));
+  child.on('close', (code) => finish(code === 0 ? 'done' : 'error', out || err));
+  return task;
+}
+
+async function applyAgent(actions) {
+  const ops = actions.filter((a) => a && a.type === 'launch_task');
+  if (!ops.length) return [];
+  const applied = [];
+  for (const a of ops.slice(0, 3)) {
+    if (!CFG.agent) { applied.push({ type: 'task', text: 'Le lancement de tâches est désactivé (mets ULTRON_AGENT=1 pour l\'activer).' }); continue; }
+    const cwd = await resolveProjectDir(a.project);
+    if (!cwd) { applied.push({ type: 'task', text: `Je ne connais pas le dossier du projet « ${a.project || '?'} » (ouvre-y une session Claude Code d'abord).` }); continue; }
+    const t = launchTask(a.project, a.prompt, cwd);
+    applied.push({ type: 'task', text: t.state === 'error' ? `Tâche non lancée : ${t.result}` : `Tâche lancée sur ${a.project}.` });
+  }
+  return applied;
+}
+
+async function buildPrompt(message) {
   const state = await buildState();
   const history = db.chat.slice(-10).map((m) => `${m.role === 'user' ? 'Moi' : 'Ultron'} : ${clip(m.text, 600)}`).join('\n');
-  const prompt = `<contexte>\n${buildContext(state)}\n</contexte>\n\n<historique>\n${history || '(début de conversation)'}\n</historique>\n\n<message>\n${message}\n</message>`;
-  const raw = await runClaude(prompt);
+  return `<contexte>\n${buildContext(state)}\n</contexte>\n\n<historique>\n${history || '(début de conversation)'}\n</historique>\n\n<message>\n${message}\n</message>`;
+}
+
+// Applique la réponse brute de la CLI (actions, Trello, mémoire du chat). Commun aux deux modes.
+async function finishChat(message, raw) {
   const reply = parseReply(raw);
   const applied = applyActions(reply.actions);
+  // Écritures Trello (après confirmation orale) : réseau, donc à part et asynchrone.
+  if (reply.actions.some((a) => a && /^trello_/.test(a.type))) applied.push(...await applyTrello(reply.actions));
+  // Lancement de tâches claude (S5-1), après confirmation orale et seulement si activé.
+  if (reply.actions.some((a) => a && a.type === 'launch_task')) applied.push(...await applyAgent(reply.actions));
   // Une réponse vide ne doit pas masquer ce qui vient d'être enregistré.
   const say = reply.say || (applied.length ? 'C\'est noté.' : 'Je n\'ai rien à répondre à ça.');
   const ts = new Date().toISOString();
@@ -771,21 +1045,77 @@ async function chat(message) {
   return { say, applied, view: applied.view || null };
 }
 
+async function chat(message) {
+  return finishChat(message, await runClaude(await buildPrompt(message)));
+}
+
+// Mode flux : le texte arrive par morceaux (onDelta), avec repli sur le mode mono-coup en cas d'échec.
+async function chatStream(message, onDelta) {
+  const prompt = await buildPrompt(message);
+  let raw;
+  try { raw = await runClaudeStream(prompt, onDelta); }
+  catch { raw = await runClaude(prompt); }
+  return finishChat(message, raw);
+}
+
 /* ───────────────────────── HTTP ───────────────────────── */
 
+/* ── S5-3 : usage de l'abonnement, lecture seule, si ULTRON_USAGE_CMD fournit du JSON ── */
+let usageCache = { at: 0, data: null };
+
+// Normalise des formes variées en { available, windows:[{label, percent, resetAt}] }. Pur, testable.
+function normalizeUsage(obj) {
+  if (!obj || typeof obj !== 'object') return { available: false };
+  const out = [];
+  const add = (label, w) => {
+    if (!w || typeof w !== 'object') return;
+    const pctRaw = w.percent ?? w.utilization ?? w.used ?? w.usedPct;
+    let percent = typeof pctRaw === 'number' ? pctRaw : null;
+    if (percent != null && percent <= 1) percent *= 100; // 0..1 → pourcentage
+    if (percent != null) percent = Math.max(0, Math.min(100, Math.round(percent)));
+    out.push({ label, percent, resetAt: w.resetAt ?? w.resets_at ?? w.reset ?? null });
+  };
+  if (Array.isArray(obj.windows)) for (const w of obj.windows) add(w.label || w.name || 'fenêtre', w);
+  else { add('5 heures', obj.five_hour ?? obj.fiveHour ?? obj['5h']); add('7 jours', obj.seven_day ?? obj.sevenDay ?? obj['7d']); }
+  const windows = out.filter((w) => w.percent != null || w.resetAt);
+  return windows.length ? { available: true, windows } : { available: false };
+}
+
+async function getUsage() {
+  if (!CFG.usageCmd) return { available: false };
+  if (usageCache.data && Date.now() - usageCache.at < 30_000) return usageCache.data;
+  const data = await new Promise((resolve) => {
+    let child;
+    try { child = spawn(CFG.usageCmd, { shell: true, env: claudeEnv() }); }
+    catch { return resolve({ available: false, error: 'commande invalide' }); }
+    let out = '';
+    const timer = setTimeout(() => { try { child.kill(); } catch { /* déjà mort */ } resolve({ available: false, error: 'délai dépassé' }); }, 10_000);
+    child.stdout.on('data', (d) => { out += d; });
+    child.on('error', () => { clearTimeout(timer); resolve({ available: false, error: 'commande introuvable' }); });
+    child.on('close', () => {
+      clearTimeout(timer);
+      try { resolve(normalizeUsage(JSON.parse(out))); } catch { resolve({ available: false, error: 'sortie illisible' }); }
+    });
+  });
+  usageCache = { at: Date.now(), data };
+  return data;
+}
+
 async function buildState(force = false) {
-  const [trello, sessions] = await Promise.all([getTrello(force), getSessions()]);
+  const [trello, sessions, usage] = await Promise.all([getTrello(force), getSessions(), getUsage()]);
   return {
     now: new Date().toISOString(),
     today: dayKey(),
     user: CFG.user,
     trello,
     sessions,
+    usage,
+    tasks: tasks.map((t) => ({ ...t, durationMs: (t.endedAt ? Date.parse(t.endedAt) : Date.now()) - Date.parse(t.startedAt) })),
     tracking: buildTracking(),
     notes: db.notes.slice(-6).reverse(),
     memory: db.memory.slice().reverse(),
     chat: db.chat.slice(-30),
-    ai: { model: CFG.claudeModel || null, lastError: aiLastError },
+    ai: { model: CFG.claudeModel || null, lastError: aiLastError, stream: CFG.stream, tts: !!CFG.ttsUrl },
   };
 }
 
@@ -849,6 +1179,137 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Réponse en flux (S4-2) : SSE. L'interface n'y vient que si CFG.stream est actif.
+    if (route === 'POST /api/chat/stream') {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      let message = '';
+      try { message = String(JSON.parse(await readBody(req)).message || '').trim(); } catch { return sendJson(res, 400, { error: 'Message illisible.' }); }
+      if (!message) return sendJson(res, 400, { error: 'Message vide.' });
+      if (aiBusy) return sendJson(res, 429, { error: 'Je réponds déjà à ta question précédente.' });
+      aiBusy = true;
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+      const sse = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      try {
+        const out = await chatStream(message.slice(0, 4000), (delta) => sse({ delta }));
+        aiLastError = null;
+        sse({ done: true, ...out });
+      } catch (e) {
+        aiLastError = e.message;
+        sse({ error: e.message });
+      } finally {
+        aiBusy = false;
+        res.end();
+      }
+      return;
+    }
+
+    // Synthèse vocale externe (S4-3), optionnelle. Sans ULTRON_TTS_URL : 204, l'interface garde la voix du navigateur.
+    if (route === 'POST /api/tts') {
+      if (!CFG.ttsUrl) { res.writeHead(204); return res.end(); }
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      let text = '';
+      try { text = String(JSON.parse(await readBody(req)).text || '').slice(0, 2000); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      if (!text.trim()) return sendJson(res, 400, { error: 'Texte vide.' });
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (CFG.ttsKey) headers.Authorization = `Bearer ${CFG.ttsKey}`;
+        const up = await fetch(CFG.ttsUrl, { method: 'POST', headers, body: JSON.stringify({ text, voice: CFG.ttsVoice || undefined }), signal: AbortSignal.timeout(15000) });
+        if (!up.ok) return sendJson(res, 502, { error: `Service de voix : ${up.status}` });
+        const buf = Buffer.from(await up.arrayBuffer());
+        res.writeHead(200, { 'Content-Type': up.headers.get('content-type') || 'audio/mpeg', 'Cache-Control': 'no-store' });
+        return res.end(buf);
+      } catch (e) {
+        return sendJson(res, 502, { error: `Service de voix injoignable : ${e.message}` });
+      }
+    }
+
+    // Saisie manuelle d'une valeur, à n'importe quelle date, sans passer par l'IA.
+    if (req.method === 'POST' && url.pathname === '/api/entries') {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      const key = String(body.key || '');
+      if (!db.metrics[key]) return sendJson(res, 404, { error: 'Mesure inconnue.' });
+      const value = Number(body.value);
+      if (!Number.isFinite(value)) return sendJson(res, 400, { error: 'Valeur invalide.' });
+      const entry = { id: uid(), key, value, date: isDayKey(body.date) ? body.date : dayKey(), note: clip(String(body.note || ''), 200), ts: new Date().toISOString() };
+      db.entries.push(entry);
+      saveDb();
+      return sendJson(res, 200, { ok: true, entry });
+    }
+
+    // Correction d'une valeur existante (valeur, date et note), sans passer par l'IA.
+    const put = url.pathname.match(/^\/api\/entries\/([\w-]+)$/);
+    if (req.method === 'PUT' && put) {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      const entry = db.entries.find((e) => e.id === put[1]);
+      if (!entry) return sendJson(res, 404, { error: 'Introuvable.' });
+      const value = Number(body.value);
+      if (!Number.isFinite(value)) return sendJson(res, 400, { error: 'Valeur invalide.' });
+      entry.value = value;
+      if (isDayKey(body.date)) entry.date = body.date;
+      if (body.note != null) entry.note = clip(String(body.note), 200);
+      saveDb();
+      return sendJson(res, 200, { ok: true, entry });
+    }
+
+    // Thèmes : créer (manuel) ou renommer, sans passer par l'IA.
+    if (req.method === 'POST' && url.pathname === '/api/themes') {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      const key = themeSlug(body.key || body.label);
+      if (!key) return sendJson(res, 400, { error: 'Nom de thème invalide.' });
+      if (!Array.isArray(db.themes)) db.themes = DEFAULT_THEMES.map((t) => ({ ...t }));
+      if (db.themes.some((t) => t.key === key)) return sendJson(res, 409, { error: 'Ce thème existe déjà.' });
+      const theme = { key, label: clip(String(body.label || body.key || key).trim(), 24) };
+      db.themes.push(theme);
+      saveDb();
+      return sendJson(res, 200, { ok: true, theme });
+    }
+    const themeRoute = url.pathname.match(/^\/api\/themes\/([\w-]+)$/);
+    if (req.method === 'PATCH' && themeRoute) {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      if (!Array.isArray(db.themes)) db.themes = DEFAULT_THEMES.map((t) => ({ ...t }));
+      const theme = db.themes.find((t) => t.key === themeRoute[1]);
+      if (!theme) return sendJson(res, 404, { error: 'Thème inconnu.' });
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      if (typeof body.label === 'string' && body.label.trim()) theme.label = clip(body.label.trim(), 24);
+      saveDb();
+      return sendJson(res, 200, { ok: true });
+    }
+
+    // Modifier une mesure : renommer, changer d'unité, de thème ou de type.
+    const metricRoute = url.pathname.match(/^\/api\/metrics\/([\w-]+)$/);
+    if (req.method === 'PATCH' && metricRoute) {
+      if (!/^application\/json/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON attendu.' });
+      const def = db.metrics[metricRoute[1]];
+      if (!def) return sendJson(res, 404, { error: 'Mesure inconnue.' });
+      let body;
+      try { body = JSON.parse(await readBody(req)); } catch { return sendJson(res, 400, { error: 'Requête illisible.' }); }
+      if (typeof body.label === 'string' && body.label.trim()) def.label = clip(body.label.trim(), 40);
+      if (typeof body.unit === 'string') def.unit = clip(body.unit.trim(), 12);
+      if (themeKeys().includes(body.category)) def.category = body.category;
+      if (['last', 'sum', 'check'].includes(body.agg)) def.agg = body.agg;
+      if (typeof body.smooth === 'boolean') def.smooth = body.smooth;
+      saveDb();
+      return sendJson(res, 200, { ok: true });
+    }
+
+    // Supprimer une mesure avec tout son historique (entrées et objectifs). La confirmation est côté interface.
+    if (req.method === 'DELETE' && metricRoute) {
+      const key = metricRoute[1];
+      if (!db.metrics[key]) return sendJson(res, 404, { error: 'Mesure inconnue.' });
+      delete db.metrics[key];
+      db.entries = db.entries.filter((e) => e.key !== key);
+      db.goals = db.goals.filter((g) => g.key !== key);
+      saveDb();
+      return sendJson(res, 200, { ok: true });
+    }
+
     const del = url.pathname.match(/^\/api\/(entries|goals|notes|memory)\/([\w-]+)$/);
     if (req.method === 'DELETE' && del) {
       const [, coll, id] = del;
@@ -857,6 +1318,16 @@ const server = http.createServer(async (req, res) => {
       if (db[coll].length === before) return sendJson(res, 404, { error: 'Introuvable.' });
       saveDb();
       return sendJson(res, 200, { ok: true });
+    }
+
+    // Export CSV de toutes les mesures.
+    if (req.method === 'GET' && url.pathname === '/api/export.csv') {
+      res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="ultron-${dayKey()}.csv"`,
+        'Cache-Control': 'no-store',
+      });
+      return res.end(entriesToCsv(db));
     }
 
     if (req.method === 'GET') {
@@ -880,17 +1351,34 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-loadDb();
-server.on('error', (e) => {
-  console.error(e.code === 'EADDRINUSE'
-    ? `Le port ${CFG.port} est déjà pris. Change PORT dans .env ou ferme l'autre Ultron.`
-    : `Le serveur n'a pas pu démarrer : ${e.message}`);
-  process.exit(1);
-});
-server.listen(CFG.port, '127.0.0.1', () => {
-  console.log(`\n  Ultron est en ligne → http://localhost:${CFG.port}\n`);
-  console.log(`  Trello        ${CFG.trelloKey && CFG.trelloToken ? 'configuré' : 'non configuré (voir .env.example)'}`);
-  console.log(`  Claude Code   ${path.join(CFG.claudeHome, 'projects')}`);
-  console.log(`  Modèle        ${CFG.claudeModel || 'celui par défaut de ton compte'}`);
-  console.log(`  Données       ${DATA_FILE}\n`);
-});
+function start() {
+  // Effets de bord réservés à l'exécution : on ne les déclenche pas à l'import (tests).
+  fs.mkdirSync(AI_CWD, { recursive: true }); // dossier vide pour la CLI, aucun CLAUDE.md chargé
+  fs.writeFileSync(SYS_FILE, SYSTEM_PROMPT);
+  loadDb();
+  backupDb(); // une copie datée au démarrage
+  server.on('error', (e) => {
+    console.error(e.code === 'EADDRINUSE'
+      ? `Le port ${CFG.port} est déjà pris. Change PORT dans .env ou ferme l'autre Ultron.`
+      : `Le serveur n'a pas pu démarrer : ${e.message}`);
+    process.exit(1);
+  });
+  server.listen(CFG.port, '127.0.0.1', () => {
+    console.log(`\n  Ultron est en ligne → http://localhost:${CFG.port}\n`);
+    console.log(`  Trello        ${CFG.trelloKey && CFG.trelloToken ? 'configuré' : 'non configuré (voir .env.example)'}`);
+    console.log(`  Claude Code   ${path.join(CFG.claudeHome, 'projects')}`);
+    console.log(`  Modèle        ${CFG.claudeModel || 'celui par défaut de ton compte'}`);
+    console.log(`  Données       ${DATA_FILE}\n`);
+  });
+}
+
+// Exécution directe (node server.js) → on démarre. Import (node:test) → on n'expose que les fonctions.
+if (require.main === module) start();
+
+// Exposé pour les tests. __setDb/__getDb donnent accès à l'état en mémoire sans toucher à data/.
+module.exports = {
+  listStatus, currentSprint, slopePerDay, streaks, evalGoal, applyActions, parseReply, isLocalRequest,
+  claudeEnv, entriesToCsv, streamEvent, normalizeUsage, addDays, CFG,
+  __setDb: (next) => { db = next; },
+  __getDb: () => db,
+};

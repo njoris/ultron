@@ -47,3 +47,11 @@ Développe et vérifie avec `npm run demo`. N'utilise `npm start` que pour ce qu
 2. `npm run demo`, et regarde le résultat dans le navigateur, sur les deux vues, y compris en largeur mobile.
 3. Si tu as touché au contrat avec l'IA, adapte `dev/fake-claude.js` pour qu'il exerce la nouvelle action.
 4. Dis ce que tu as vérifié et comment, et ce que tu n'as pas pu vérifier (micro, vrai Trello, vraie CLI).
+
+## Workflow git
+
+- `main` = branche de **production** (prod).
+- `staging` = branche de **pré-production** (preprod).
+- Chaque ticket part d'une **nouvelle branche créée depuis `staging`** (jamais depuis `main`).
+- Une fois le ticket terminé : lancer `/code-review`, puis `/simplify`, **fixer** ce qui est demandé, puis **relancer `/code-review`**.
+- Si tout est OK → **push**.

@@ -201,6 +201,38 @@
   .x:hover { color: var(--ember); }
   .under { margin-top: 28px; }
 
+  .entry-edit { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .entry-edit h4 { margin: 0 0 8px; color: var(--bone); font-size: 14px; font-weight: 600; }
+  .entry-edit .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .entry-edit input { background: var(--steel-800); border: 1px solid var(--line); border-radius: 6px; color: var(--bone); padding: 7px 9px; font: 14px var(--body); }
+  .entry-edit input::placeholder { color: var(--fog); }
+  .entry-edit input[type="number"] { width: 110px; }
+  .entry-edit input[type="date"] { width: 160px; }
+  .entry-edit input[type="text"] { flex: 1; min-width: 140px; }
+  .entry-edit select { background: var(--steel-800); border: 1px solid var(--line); border-radius: 6px; color: var(--bone); padding: 7px 9px; font: 14px var(--body); }
+  .entry-edit .save { background: var(--steel-600); border: 1px solid var(--line); border-radius: 6px; color: var(--bone); padding: 7px 14px; font-size: 14px; cursor: pointer; }
+  .entry-edit .save:hover { background: var(--line); }
+  .entry-edit .danger { background: none; border: 1px solid var(--ember); border-radius: 6px; color: var(--ember); padding: 7px 14px; font-size: 14px; cursor: pointer; }
+  .entry-edit .danger:hover { background: var(--ember); color: var(--steel-900); }
+  .entry-edit .check { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; color: var(--fog); font-size: 13px; }
+  .entry-edit .check input { width: auto; margin-top: 2px; }
+  .entry-list { margin-top: 12px; }
+  .entry-list .rows li.editing { outline: 1px solid var(--mint); outline-offset: 3px; border-radius: 4px; }
+  a.export { color: var(--mint); font-size: 13px; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+  a.export:hover { background: var(--steel-700); }
+  .proj .sprint { display: inline-block; margin-left: 8px; font-size: 12px; color: var(--mint); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; vertical-align: middle; }
+  .proj-sessions { margin-top: 12px; }
+  .proj-sessions h4 { margin: 0 0 6px; font-size: 13px; color: var(--fog); font-weight: 600; }
+  .usage { display: flex; gap: 18px; flex-wrap: wrap; }
+  .usage .uwin { flex: 1; min-width: 160px; }
+  .usage .line { display: flex; justify-content: space-between; color: var(--fog); font-size: 14px; }
+  .usage .track { height: 6px; background: var(--steel-600); border-radius: 3px; margin-top: 5px; overflow: hidden; }
+  .usage .track i { display: block; height: 100%; background: var(--mint); }
+  .usage .sub { font-size: 12px; color: var(--fog); }
+  .task-done { color: var(--mint); }
+  .task-error { color: var(--ember); }
+  .task-running { color: var(--fog); }
+
   @media (max-width: 1180px) { .view { grid-template-columns: minmax(0, 1fr); } }
   @media (max-width: 820px) {
     .app { grid-template-columns: minmax(0, 1fr); }
@@ -227,6 +259,7 @@
     <div class="toggles">
       <label><input type="checkbox" id="wake"> Écoute continue</label>
       <label><input type="checkbox" id="speak"> Réponses à voix haute</label>
+      <label>Rappel du soir <input type="time" id="reminder"></label>
     </div>
   </aside>
 
@@ -239,9 +272,12 @@
       <section class="today wide" id="today"></section>
       <section id="projects"></section>
       <section id="sessions"></section>
+      <section id="tasks"></section>
+      <section id="usage"></section>
     </div>
     <div class="view" id="view-moi" hidden>
       <section class="today wide" id="me-head"></section>
+      <section class="wide" id="me-week"></section>
       <section id="me-goals"></section>
       <section id="me-rhythm"></section>
       <section class="wide" id="me-metrics"></section>
@@ -432,6 +468,63 @@ function addMsg(kind, text, applied) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+// En mode flux, les deltas construisent un JSON {say, actions} : on en extrait le "say" au fil de l'eau.
+function partialSay(raw) {
+  const m = raw.match(/"say"\s*:\s*"((?:[^"\\]|\\.)*)/);
+  if (!m) return '';
+  let s = m[1];
+  if (s.endsWith('\\')) s = s.slice(0, -1); // couper une séquence d'échappement incomplète
+  try { return JSON.parse('"' + s + '"'); } catch { return s.replace(/\\"/g, '"').replace(/\\n/g, ' '); }
+}
+// File de parole SANS cancel (pour enchaîner plusieurs phrases). Seule la dernière rouvre le micro.
+function speakQueued(text, last, onLast) {
+  if (!ui.speakOn || !('speechSynthesis' in window) || !text) { if (last) { setCore('idle'); onLast?.(); } return; }
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'fr-FR';
+  const v = pickVoice(); if (v) u.voice = v;
+  u.rate = 1.06;
+  u.onstart = () => { ui.speaking = true; stopRec(true); setCore('speaking', ''); };
+  const done = () => { if (last) { ui.speaking = false; setCore('idle'); resumeWake(); onLast?.(); } };
+  u.onend = done; u.onerror = done;
+  speechSynthesis.speak(u);
+}
+
+async function sendStream(text, reopenMic) {
+  const res = await fetch('/api/chat/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
+  if (!res.ok || !res.body) { const o = await res.json().catch(() => ({})); throw new Error(o.error || `Erreur ${res.status}`); }
+  const el = h('div', { class: 'msg ultron' }, '');
+  logEl.append(el); logEl.scrollTop = logEl.scrollHeight;
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = '', raw = '', firstSpoken = '', out = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const line = buf.slice(0, i).replace(/^data: ?/, ''); buf = buf.slice(i + 2);
+      let ev; try { ev = JSON.parse(line); } catch { continue; }
+      if (ev.error) throw new Error(ev.error);
+      if (ev.delta) {
+        raw += ev.delta;
+        const s = partialSay(raw);
+        if (s) { el.textContent = s; logEl.scrollTop = logEl.scrollHeight; }
+        // dès la première phrase complète (suivie d'une espace), on la prononce
+        if (!firstSpoken) { const mm = s.match(/^\s*([\s\S]*?[.!?])\s/); if (mm) { firstSpoken = mm[1].trim(); speakQueued(firstSpoken, false); } }
+      }
+      if (ev.done) out = ev;
+    }
+  }
+  if (!out) throw new Error('Réponse interrompue.');
+  el.textContent = out.say;
+  if (out.applied?.length) el.append(h('ul', { class: 'applied' }, out.applied.map((a) => h('li', null, a.text))));
+  logEl.scrollTop = logEl.scrollHeight;
+  let remainder = out.say;
+  if (firstSpoken && out.say.startsWith(firstSpoken)) remainder = out.say.slice(firstSpoken.length).trim();
+  speakQueued(remainder || (firstSpoken ? ' ' : out.say), true, () => reopenMic(out.say));
+  return out;
+}
+
 async function send(text, viaVoice) {
   text = text.trim();
   if (!text || ui.busy) return;
@@ -441,23 +534,30 @@ async function send(text, viaVoice) {
   stopSpeaking();
   addMsg('me', text);
   setCore('thinking');
+  // Ultron vient de poser une question à l'oral : on rouvre le micro sans attendre un clic.
+  const reopenMic = (said) => {
+    if (!(viaVoice && ui.speakOn && SR && /\?\s*$/.test(said || ''))) return;
+    if (ui.wake) { ui.armedUntil = Date.now() + 8000; setCore('listening'); if (!rec) startRec('wake'); }
+    else startRec('ptt');
+  };
   try {
-    const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
-    const out = await res.json();
-    if (!res.ok) throw new Error(out.error || `Erreur ${res.status}`);
-    addMsg('ultron', out.say, out.applied);
-    if (out.view) setView(out.view);
-    ui.busy = false;
-    // Ultron vient de poser une question à l'oral : on rouvre le micro sans attendre un clic.
-    const listenNext = viaVoice && ui.speakOn && SR && /\?\s*$/.test(out.say);
-    speak(out.say, listenNext ? () => {
-      if (ui.wake) { ui.armedUntil = Date.now() + 8000; setCore('listening'); if (!rec) startRec('wake'); }
-      else startRec('ptt');
-    } : null);
-    refresh();
+    if (state && state.ai && state.ai.stream) {
+      const out = await sendStream(text, reopenMic);
+      if (out.view) setView(out.view);
+      refresh();
+    } else {
+      const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error || `Erreur ${res.status}`);
+      addMsg('ultron', out.say, out.applied);
+      if (out.view) setView(out.view);
+      ui.busy = false;
+      const listenNext = viaVoice && ui.speakOn && SR && /\?\s*$/.test(out.say);
+      speak(out.say, listenNext ? () => reopenMic(out.say) : null);
+      refresh();
+    }
   } catch (e) {
     addMsg('err', e.message === 'Failed to fetch' ? 'Le serveur Ultron ne répond pas. Relance « npm start » dans le dossier du projet.' : e.message);
-    ui.busy = false;
     setCore('idle');
     resumeWake();
   } finally {
@@ -487,9 +587,16 @@ function pickVoice() {
   const voices = speechSynthesis.getVoices().filter((v) => v.lang?.toLowerCase().startsWith('fr'));
   return voices.find((v) => /google|natural|premium|enhanced|thomas|daniel/i.test(v.name)) || voices.find((v) => v.lang === 'fr-FR') || voices[0] || null;
 }
+let ttsAudio = null; // lecture audio de la voix externe en cours
 function speak(text, done) {
   const finish = () => { ui.speaking = false; setCore('idle'); resumeWake(); done?.(); };
-  if (!ui.speakOn || !('speechSynthesis' in window) || !text) return finish();
+  if (!ui.speakOn || !text) return finish();
+  // S4-3 : si une voix externe est configurée côté serveur, on l'essaie d'abord, repli navigateur sinon.
+  if (state && state.ai && state.ai.tts) return speakExternal(text, finish, () => speakBrowser(text, finish));
+  speakBrowser(text, finish);
+}
+function speakBrowser(text, finish) {
+  if (!('speechSynthesis' in window)) return finish();
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'fr-FR';
@@ -502,8 +609,22 @@ function speak(text, done) {
   u.onerror = finish;
   speechSynthesis.speak(u);
 }
+function speakExternal(text, finish, fallback) {
+  fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
+    .then((r) => { if (r.status === 204 || !r.ok) throw new Error('voix externe indisponible'); return r.blob(); })
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = new Audio(url); ttsAudio = a;
+      ui.speaking = true; stopRec(true); setCore('speaking', '');
+      const end = () => { URL.revokeObjectURL(url); if (ttsAudio === a) ttsAudio = null; finish(); };
+      a.onended = end; a.onerror = end;
+      a.play().catch(() => { URL.revokeObjectURL(url); if (ttsAudio === a) ttsAudio = null; fallback(); });
+    })
+    .catch(() => fallback());
+}
 function stopSpeaking() {
   if ('speechSynthesis' in window && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel();
+  if (ttsAudio) { try { ttsAudio.pause(); } catch (e) { /* déjà arrêté */ } ttsAudio = null; }
   ui.speaking = false;
 }
 if ('speechSynthesis' in window) speechSynthesis.getVoices(); // déclenche le chargement des voix
@@ -637,6 +758,8 @@ async function refresh(force) {
     state = await res.json();
     render();
     announceSessions();
+    announceTasks();
+    checkReminder();
     if (firstLoad) {
       firstLoad = false;
       for (const m of state.chat) addMsg(m.role === 'user' ? 'me' : 'ultron', m.text, m.applied);
@@ -719,30 +842,78 @@ function renderProjects() {
       const id = 'todo-' + b.id;
       kids.push(h('article', { class: 'proj' },
         h('header', null, h('a', { href: b.url, target: '_blank', rel: 'noopener' }, b.name),
-          h('span', { class: 'sub' }, b.total ? `${b.counts.done} sur ${b.total} terminés` : 'aucun ticket')),
+          h('span', { class: 'sub' }, b.total ? `${b.counts.done} sur ${b.total} terminés` : 'aucun ticket'),
+          b.sprint ? h('span', { class: 'sprint', title: `${b.sprint.done}/${b.sprint.total} tickets du ${b.sprint.label} terminés` },
+            `${b.sprint.label} · ${b.sprint.done}/${b.sprint.total} (${Math.round(b.sprint.progress * 100)} %)`) : null),
         b.total ? h('div', { class: 'bar', role: 'img', 'aria-label': `${b.counts.done} terminés, ${b.counts.review} en revue, ${b.counts.doing} en cours, ${b.counts.todo} à faire` },
           ['done', 'review', 'doing', 'todo'].map((s) => b.counts[s] ? h('i', { class: 's-' + s, style: `flex:${b.counts[s]}` }) : null)) : null,
         active.length ? h('ul', { class: 'tickets' }, active.map((c) => ticket(c))) : null,
         todo.length ? h('details', { open: openDetails.has(id), ontoggle: (e) => e.target.open ? openDetails.add(id) : openDetails.delete(id) },
-          h('summary', null, `À faire (${todo.length})`), h('ul', { class: 'tickets' }, todo.map((c) => ticket(c)))) : null));
+          h('summary', null, `À faire (${todo.length})`), h('ul', { class: 'tickets' }, todo.map((c) => ticket(c)))) : null,
+        (() => { const linked = (state.sessions.items || []).filter((x) => normName(x.project) === normName(b.name));
+          return linked.length ? h('div', { class: 'proj-sessions' }, h('h4', null, linked.length > 1 ? 'Sessions Claude Code' : 'Session Claude Code'), linked.map(sessCard)) : null; })()));
     }
   }
   $('#projects').replaceChildren(...kids);
 }
 
 const STATE_LABEL = { working: 'travaille', waiting: 't\'attend', idle: 'en pause' };
-function renderSessions() {
-  const s = state.sessions;
-  const kids = [h('div', { class: 'head' }, h('h2', null, 'Sessions Claude Code'))];
-  if (!s.found) kids.push(h('p', { class: 'empty' }, 'Aucun dossier Claude Code trouvé sur cette machine. Dès que tu lances ', h('code', null, 'claude'), ' dans un projet, la session apparaît ici.'));
-  else if (!s.items.length) kids.push(h('p', { class: 'empty' }, 'Aucune session ces trois derniers jours.'));
-  else kids.push(h('div', null, s.items.map((x) => h('div', { class: 'sess' },
+// Nom comparable (minuscules, sans accents ni ponctuation) pour relier une session à un tableau.
+const normName = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+// Le tableau Trello dont le nom correspond au dossier de la session, s'il existe.
+function sessionBoard(x) {
+  const boards = state.trello && state.trello.boards;
+  if (!boards || !x.project) return null;
+  const p = normName(x.project);
+  return boards.find((b) => normName(b.name) === p) || null;
+}
+function sessCard(x) {
+  return h('div', { class: 'sess' },
     h('div', { class: 'top' },
       h('span', { class: 'who' }, x.project, x.branch ? h('small', null, x.branch) : null),
       h('span', { class: `state ${x.state}` }, `${STATE_LABEL[x.state]}, ${ago(x.updatedAt)}`)),
     h('p', { class: 'title' }, x.title),
     x.pending ? h('p', { class: 'pending' }, x.pending) : null,
-    x.lastReply ? h('p', null, x.lastReply) : null))));
+    x.lastReply ? h('p', null, x.lastReply) : null);
+}
+
+// S5-1/S5-2 : tâches Claude Code lancées par Ultron.
+const TASK_LABEL = { running: 'en cours', done: 'terminée', error: 'échec' };
+function fmtDur(ms) { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s} s` : `${Math.round(s / 60)} min`; }
+function renderTasks() {
+  const list = state.tasks || [];
+  const kids = [];
+  if (list.length) {
+    kids.push(h('div', { class: 'head' }, h('h2', null, 'Tâches lancées')));
+    kids.push(h('ul', { class: 'rows' }, list.map((t) => h('li', null,
+      h('span', { class: 'name' }, `${t.project} — ${t.prompt}`),
+      h('span', { class: `meta task-${t.state}` }, `${TASK_LABEL[t.state] || t.state} · ${fmtDur(t.durationMs)}`)))));
+  }
+  $('#tasks').replaceChildren(...kids); // rien tant qu'aucune tâche
+}
+
+// S5-3 : usage de l'abonnement, affiché seulement si le serveur a pu le lire (ULTRON_USAGE_CMD).
+function renderUsage() {
+  const u = state.usage;
+  const kids = [];
+  if (u && u.available) {
+    kids.push(h('div', { class: 'head' }, h('h2', null, 'Abonnement Claude')));
+    kids.push(h('div', { class: 'usage' }, u.windows.map((w) => h('div', { class: 'uwin' },
+      h('div', { class: 'line' }, h('span', null, w.label), h('span', null, w.percent != null ? `${w.percent} %` : '')),
+      w.percent != null ? h('div', { class: 'track' }, h('i', { style: `width:${w.percent}%` })) : null,
+      w.resetAt ? h('span', { class: 'sub' }, `réinitialisé ${w.resetAt}`) : null))));
+  }
+  $('#usage').replaceChildren(...kids); // rien si indisponible
+}
+
+function renderSessions() {
+  const s = state.sessions;
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Sessions Claude Code'))];
+  const unlinked = (s.items || []).filter((x) => !sessionBoard(x)); // les autres sont montrées sous leur projet
+  if (!s.found) kids.push(h('p', { class: 'empty' }, 'Aucun dossier Claude Code trouvé sur cette machine. Dès que tu lances ', h('code', null, 'claude'), ' dans un projet, la session apparaît ici.'));
+  else if (!s.items.length) kids.push(h('p', { class: 'empty' }, 'Aucune session ces trois derniers jours.'));
+  else if (!unlinked.length) kids.push(h('p', { class: 'empty' }, 'Toutes les sessions récentes sont rattachées à un projet ci-dessus.'));
+  else kids.push(h('div', null, unlinked.map(sessCard)));
   $('#sessions').replaceChildren(...kids);
 }
 
@@ -770,11 +941,93 @@ async function remove(coll, id) {
   refresh();
 }
 
+// Crée un thème à la main quand on choisit « + nouveau thème… », et y range la mesure.
+async function newThemeFromSelect(e, key, prevCategory) {
+  if (e.target.value !== '__new__') return;
+  const name = (prompt('Nom du nouveau thème ?') || '').trim();
+  if (!name) { e.target.value = prevCategory; return; }
+  metricFormFocused = false;
+  const r = await fetch('/api/themes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: name }) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { addMsg('info', 'Thème impossible : ' + (d.error || 'erreur.')); e.target.value = prevCategory; return; }
+  await fetch(`/api/metrics/${key}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category: d.theme.key }) });
+  refresh();
+}
+
+// Renomme un thème existant.
+async function renameTheme(cat) {
+  if (!cat || cat === '__new__') return;
+  const name = (prompt('Nouveau nom du thème ?', CAT_LABEL[cat] || cat) || '').trim();
+  if (!name) return;
+  metricFormFocused = false;
+  const r = await fetch(`/api/themes/${cat}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: name }) });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); addMsg('info', 'Renommage impossible : ' + (e.error || 'erreur.')); return; }
+  refresh();
+}
+
+// Modifie une mesure (libellé, unité, thème, type), sans passer par l'IA.
+async function saveMetric(key) {
+  const smoothEl = $('#ms-smooth');
+  const payload = {
+    label: $('#ms-label').value,
+    unit: $('#ms-unit').value,
+    category: $('#ms-cat').value,
+    agg: $('#ms-agg').value,
+    ...(smoothEl ? { smooth: smoothEl.checked } : {}),
+  };
+  metricFormFocused = false;
+  const res = await fetch(`/api/metrics/${key}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); addMsg('info', 'Modification impossible : ' + (e.error || 'erreur.')); return; }
+  metricSettingsOpen = false;
+  refresh();
+}
+
+// Supprime une mesure et tout son historique, après confirmation.
+async function deleteMetric(key, label) {
+  if (!confirm(`Supprimer « ${label} » et tout son historique ? C'est définitif.`)) return;
+  metricFormFocused = false;
+  const res = await fetch(`/api/metrics/${key}`, { method: 'DELETE' });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); addMsg('info', 'Suppression impossible : ' + (e.error || 'erreur.')); return; }
+  metricSettingsOpen = false;
+  if (selectedMetric === key) selectedMetric = null;
+  refresh();
+}
+
+// Ajoute (POST) ou corrige (PUT) une valeur à la main, sans passer par l'IA.
+async function saveEntry(key) {
+  const vEl = $('#ee-value'), dEl = $('#ee-date'), nEl = $('#ee-note');
+  const value = Number(vEl.value);
+  if (vEl.value.trim() === '' || !Number.isFinite(value)) { vEl.focus(); return; }
+  const date = dEl.value || undefined;
+  const note = nEl.value;
+  const opts = { method: editEntryId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' } };
+  const url = editEntryId ? `/api/entries/${editEntryId}` : '/api/entries';
+  opts.body = JSON.stringify(editEntryId ? { value, date, note } : { key, value, date, note });
+  metricFormFocused = false;
+  const res = await fetch(url, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    addMsg('info', 'Enregistrement impossible : ' + (err.error || 'erreur.'));
+    return;
+  }
+  editEntryId = null;
+  refresh();
+}
+
 /* ───────────────────────── vue « Moi » ───────────────────────── */
-const CAT_LABEL = { corps: 'Corps', sport: 'Sport', sommeil: 'Sommeil', esprit: 'Esprit', argent: 'Argent', autre: 'Autre' };
+// Thèmes : libellés rafraîchis depuis le serveur (state.tracking.themes). Ce repli sert avant le premier état.
+let CAT_LABEL = { corps: 'Corps', sport: 'Sport', sommeil: 'Sommeil', esprit: 'Esprit', argent: 'Argent', autre: 'Autre' };
+function syncThemes() {
+  const ts = state && state.tracking && state.tracking.themes;
+  if (Array.isArray(ts) && ts.length) { const o = {}; for (const t of ts) o[t.key] = t.label; CAT_LABEL = o; }
+}
 const GOAL_STATUS = { reached: 'atteint', on_track: 'dans les temps', behind: 'en retard', stalled: 'à l\'arrêt', unknown: '' };
 let selectedMetric = null;
 let range = Number(localStorage.getItem('ultron.range')) || 30;
+let editEntryId = null;          // entrée en cours de correction, sinon null (ajout)
+let metricFormFocused = false;   // vrai tant qu'un champ du formulaire a le focus : on gèle le re-render
+let metricSettingsOpen = false;  // panneau « modifier la mesure » ouvert
+const AGG_LABEL = { last: 'état relevé', sum: 'cumul du jour', check: 'habitude' };
 
 const dayOffset = (key, n) => { const d = new Date(key + 'T12:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const dayGap = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 864e5);
@@ -891,13 +1144,56 @@ function metricDetail(m) {
     ? [stat('Cette semaine', m.week), stat('Semaine dernière', m.lastWeek ?? 0), stat('30 derniers jours', m.total30), stat('Meilleur jour', m.max)]
     : [stat('Moyenne 7 jours', m.avg7), stat('Moyenne 30 jours', m.avg30), stat('Plus bas', m.min), stat('Plus haut', m.max),
       h('div', null, h('span', null, 'Tendance par semaine'), h('b', null, m.slope == null ? '–' : `${m.slope > 0 ? '+' : '−'}${nf.format(Math.abs(m.slope * 7))}${u ? ' ' + u : ''}`))];
+  const editing = editEntryId ? m.rawEntries.find((e) => e.id === editEntryId) : null;
+  const onf = () => { metricFormFocused = true; };
+  const onb = () => { metricFormFocused = false; };
+  const onEnter = (e) => { if (e.key === 'Enter') saveEntry(m.key); };
+  const editor = h('div', { class: 'entry-edit' },
+    h('h4', null, editing ? 'Corriger une valeur' : 'Ajouter une valeur'),
+    h('div', { class: 'row' },
+      h('input', { id: 'ee-value', type: 'number', step: 'any', inputmode: 'decimal', 'aria-label': 'Valeur', placeholder: u || 'valeur', value: editing ? editing.value : '', onfocus: onf, onblur: onb, onkeydown: onEnter }),
+      h('input', { id: 'ee-date', type: 'date', 'aria-label': 'Date', max: state.today, value: editing ? editing.date : state.today, onfocus: onf, onblur: onb }),
+      h('input', { id: 'ee-note', type: 'text', 'aria-label': 'Note', placeholder: 'note (facultatif)', value: editing ? editing.note : '', onfocus: onf, onblur: onb, onkeydown: onEnter }),
+      h('button', { type: 'button', class: 'save', onclick: () => saveEntry(m.key) }, editing ? 'Corriger' : 'Ajouter'),
+      editing ? h('button', { type: 'button', class: 'x', onclick: () => { editEntryId = null; metricFormFocused = false; renderMetrics(); } }, 'annuler') : null));
+  const list = h('div', { class: 'entry-list' },
+    m.rawEntries.length
+      ? h('ul', { class: 'rows' }, m.rawEntries.slice(0, 12).map((e) => h('li', { class: e.id === editEntryId ? 'editing' : null },
+          h('span', { class: 'name' }, `${shortDate(e.date)} · ${nf.format(e.value)}${u ? ' ' + u : ''}${e.note ? ' — ' + e.note : ''}`),
+          h('span', { class: 'meta' },
+            h('button', { class: 'x', type: 'button', onclick: () => { editEntryId = e.id; renderMetrics(); const el = $('#ee-value'); if (el) { el.focus(); el.select(); } } }, 'corriger'),
+            ' ',
+            h('button', { class: 'x', type: 'button', onclick: () => remove('entries', e.id) }, 'supprimer')))))
+      : h('p', { class: 'empty' }, 'Aucune valeur saisie pour l\'instant.'));
+  const settings = !metricSettingsOpen ? null : h('div', { class: 'entry-edit' },
+    h('h4', null, 'Modifier la mesure'),
+    h('div', { class: 'row' },
+      h('input', { id: 'ms-label', type: 'text', 'aria-label': 'Nom', placeholder: 'nom', value: m.label, onfocus: onf, onblur: onb }),
+      h('input', { id: 'ms-unit', type: 'text', 'aria-label': 'Unité', placeholder: 'unité', value: m.unit, onfocus: onf, onblur: onb }),
+      h('select', { id: 'ms-cat', 'aria-label': 'Thème', onfocus: onf, onblur: onb, onchange: (e) => newThemeFromSelect(e, m.key, m.category) },
+        [...Object.keys(CAT_LABEL).map((c) => h('option', { value: c, selected: c === m.category ? true : null }, CAT_LABEL[c])),
+          h('option', { value: '__new__' }, '+ nouveau thème…')]),
+      h('button', { type: 'button', class: 'x', onclick: () => renameTheme($('#ms-cat').value) }, 'renommer'),
+      h('select', { id: 'ms-agg', 'aria-label': 'Type', onfocus: onf, onblur: onb },
+        Object.keys(AGG_LABEL).map((a) => h('option', { value: a, selected: a === m.agg ? true : null }, AGG_LABEL[a]))),
+      h('button', { type: 'button', class: 'save', onclick: () => saveMetric(m.key) }, 'Enregistrer')),
+    m.agg === 'last' ? h('label', { class: 'check' },
+      h('input', { id: 'ms-smooth', type: 'checkbox', checked: m.smooth ? true : null, onfocus: onf, onblur: onb }),
+      ' Pour les objectifs, lisser la progression sur la moyenne des 7 derniers jours (au lieu de la dernière valeur).') : null,
+    h('div', { class: 'row', style: 'margin-top:10px' },
+      h('button', { type: 'button', class: 'danger', onclick: () => deleteMetric(m.key, m.label) }, 'Supprimer la mesure et son historique')));
   return h('div', { class: 'detail' },
     h('div', { class: 'head' },
       h('h3', { style: 'margin:0;color:var(--bone);font-size:17px' }, m.label),
-      h('div', { class: 'seg', role: 'group', 'aria-label': 'Période' }, [[30, '30 jours'], [90, '90 jours'], [180, '6 mois']].map(([n, label]) =>
-        h('button', { type: 'button', 'aria-pressed': String(range === n), onclick: () => { range = n; localStorage.setItem('ultron.range', n); renderMetrics(); } }, label)))),
+      h('div', { style: 'display:flex; gap:10px; align-items:center' },
+        h('div', { class: 'seg', role: 'group', 'aria-label': 'Période' }, [[30, '30 jours'], [90, '90 jours'], [180, '6 mois']].map(([n, label]) =>
+          h('button', { type: 'button', 'aria-pressed': String(range === n), onclick: () => { range = n; localStorage.setItem('ultron.range', n); renderMetrics(); } }, label))),
+        h('button', { type: 'button', class: 'x', 'aria-expanded': String(metricSettingsOpen), onclick: () => { metricSettingsOpen = !metricSettingsOpen; renderMetrics(); } }, metricSettingsOpen ? 'fermer' : 'modifier'))),
+    settings,
     bigChart(m, reach?.target),
-    h('div', { class: 'stats' }, stats));
+    h('div', { class: 'stats' }, stats),
+    editor,
+    list);
 }
 
 function renderMetrics() {
@@ -913,7 +1209,7 @@ function renderMetrics() {
       const reach = m.goals.find((g) => g.kind === 'reach');
       const shown = m.agg === 'sum' ? m.week : m.latest?.value;
       const delta = m.agg === 'last' && m.delta ? `${m.delta > 0 ? '+' : '−'}${nf.format(Math.abs(m.delta))}` : '';
-      return h('button', { class: 'tile', type: 'button', 'aria-expanded': String(selectedMetric === m.key), onclick: () => { selectedMetric = selectedMetric === m.key ? null : m.key; renderMetrics(); } },
+      return h('button', { class: 'tile', type: 'button', 'aria-expanded': String(selectedMetric === m.key), onclick: () => { selectedMetric = selectedMetric === m.key ? null : m.key; editEntryId = null; metricSettingsOpen = false; metricFormFocused = false; renderMetrics(); } },
         h('span', { class: 'label' }, h('span', null, m.label + (m.agg === 'sum' ? ', cette semaine' : '')),
           h('span', null, delta || (m.latest ? shortDate(m.latest.date) : ''))),
         h('span', { class: 'val' }, shown != null ? nf.format(shown) : '–', h('span', null, m.unit)),
@@ -925,9 +1221,51 @@ function renderMetrics() {
   $('#me-metrics').replaceChildren(...kids);
 }
 
+// « Ma semaine » : comparaison avec la semaine précédente, objectifs et régularité.
+function renderWeek() {
+  const tr = state.tracking;
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Ma semaine'))];
+  if (!tr.metrics.length) { $('#me-week').replaceChildren(...kids, h('p', { class: 'empty' }, 'Dicte tes premières mesures et ton bilan de la semaine apparaîtra ici.')); return; }
+  kids.push(h('p', { class: 'sub' }, `Régularité : ${plural(tr.logStreak.current, 'jour', 'jours')} de saisie d'affilée (record ${tr.logStreak.best}).`));
+
+  const cols = [];
+  // Cumuls et habitudes : total de la semaine contre la semaine dernière.
+  const weekly = tr.metrics.filter((m) => m.agg !== 'last');
+  if (weekly.length) cols.push(h('div', null, h('h3', null, 'Cette semaine'),
+    h('ul', { class: 'rows' }, weekly.map((m) => {
+      const u = m.unit ? ' ' + m.unit : '';
+      const cur = m.agg === 'check' ? plural(m.week, 'fois', 'fois') : `${nf.format(m.week)}${u}`;
+      const prevN = m.lastWeek ?? 0;
+      const diff = m.week - prevN;
+      const sign = diff > 0 ? '+' : diff < 0 ? '−' : '=';
+      const comp = diff === 0 ? 'comme la semaine dernière' : `${sign}${nf.format(Math.abs(diff))}${m.agg === 'check' ? '' : u} vs sem. dernière`;
+      return h('li', null, h('span', { class: 'name' }, m.label + ' : ' + cur), h('span', { class: 'meta' }, comp));
+    }))));
+  // États relevés : dernière valeur et tendance hebdomadaire.
+  const states = tr.metrics.filter((m) => m.agg === 'last');
+  if (states.length) cols.push(h('div', null, h('h3', null, 'Où tu en es'),
+    h('ul', { class: 'rows' }, states.map((m) => {
+      const u = m.unit ? ' ' + m.unit : '';
+      const val = m.latest ? `${nf.format(m.latest.value)}${u}` : '–';
+      const trend = m.slope == null ? 'pas assez de recul' : `${m.slope > 0 ? '+' : '−'}${nf.format(Math.abs(m.slope * 7))}${u}/sem.`;
+      return h('li', null, h('span', { class: 'name' }, m.label + ' : ' + val), h('span', { class: 'meta' }, trend));
+    }))));
+  // Objectifs : tenus ou non.
+  const goals = tr.metrics.flatMap((m) => m.goals.map((g) => ({ label: m.label, g })));
+  if (goals.length) cols.push(h('div', null, h('h3', null, 'Objectifs'),
+    h('ul', { class: 'rows' }, goals.map(({ label, g }) => h('li', null,
+      h('span', { class: 'name' }, label),
+      h('span', { class: 'meta', style: g.status === 'behind' || g.status === 'stalled' ? 'color:var(--ember)' : (g.reached ? 'color:var(--mint)' : null) },
+        g.reached ? 'atteint' : (GOAL_STATUS[g.status] || '—')))))));
+
+  kids.push(h('div', { class: 'cols' }, cols));
+  $('#me-week').replaceChildren(...kids);
+}
+
 function renderJournal() {
   const tr = state.tracking;
-  const kids = [h('div', { class: 'head' }, h('h2', null, 'Journal'))];
+  const kids = [h('div', { class: 'head' }, h('h2', null, 'Journal'),
+    h('a', { class: 'export', href: '/api/export.csv', download: 'ultron.csv' }, 'Exporter en CSV'))];
   const cols = [];
   cols.push(h('div', null, h('h3', null, 'Saisi aujourd\'hui'),
     tr.todayEntries.length ? h('ul', { class: 'rows' }, tr.todayEntries.map((e) => h('li', null,
@@ -963,8 +1301,11 @@ $('#tab-moi').addEventListener('click', () => setView('moi'));
 setView(view);
 
 function render() {
-  renderToday(); renderProjects(); renderSessions();
-  renderMeHead(); renderGoals(); renderRhythm(); renderMetrics(); renderJournal();
+  renderToday(); renderProjects(); renderSessions(); renderTasks(); renderUsage();
+  syncThemes();
+  renderMeHead(); renderWeek(); renderGoals(); renderRhythm();
+  if (!metricFormFocused) renderMetrics(); // on ne reconstruit pas le détail pendant une saisie
+  renderJournal();
 }
 
 /* Une session qui passe de « travaille » à « t'attend » : Ultron le dit sans qu'on demande. */
@@ -980,6 +1321,45 @@ function announceSessions() {
   const text = names.length === 1 ? `La session ${names[0]} t'attend.` : `${names.length} sessions t'attendent : ${names.join(', ')}.`;
   addMsg('info', text);
   if (!ui.busy && !ui.speaking && !(rec && recMode === 'ptt')) speak(text);
+}
+
+/* Rappel du soir : à l'heure réglée, si des mesures manquent, Ultron le dit une seule fois dans la journée. */
+function checkReminder() {
+  const at = localStorage.getItem('ultron.reminder');
+  if (!at || !state || !state.tracking) return;
+  const now = new Date();
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  if (hhmm < at) return;                                             // pas encore l'heure
+  if (localStorage.getItem('ultron.reminderDone') === state.today) return; // déjà dit aujourd'hui
+  const missing = state.tracking.missingToday || [];
+  if (!missing.length) return;                                       // rien ne manque : on se tait
+  localStorage.setItem('ultron.reminderDone', state.today);
+  const text = `Petit rappel du soir : tu n'as pas encore noté ${missing.map((m) => m.label).join(', ')} aujourd'hui.`;
+  addMsg('info', text);
+  if (!ui.busy && !ui.speaking && !(rec && recMode === 'ptt')) speak(text);
+}
+
+// Réglage de l'heure du rappel (vide = désactivé). Défaut : 21h00.
+(() => {
+  const el = $('#reminder');
+  let v = localStorage.getItem('ultron.reminder');
+  if (v == null) { v = '21:00'; localStorage.setItem('ultron.reminder', v); }
+  el.value = v;
+  el.addEventListener('change', () => localStorage.setItem('ultron.reminder', el.value));
+})();
+
+// S5-2 : alerte parlée quand une tâche lancée se termine ou échoue.
+const lastTaskState = new Map();
+function announceTasks() {
+  for (const t of (state.tasks || [])) {
+    const before = lastTaskState.get(t.id);
+    if (before === 'running' && (t.state === 'done' || t.state === 'error')) {
+      const msg = t.state === 'done' ? `La tâche sur ${t.project} est terminée.` : `La tâche sur ${t.project} a échoué.`;
+      addMsg('info', msg);
+      if (!ui.busy && !ui.speaking && !(rec && recMode === 'ptt')) speak(msg);
+    }
+    lastTaskState.set(t.id, t.state);
+  }
 }
 
 function tick() {

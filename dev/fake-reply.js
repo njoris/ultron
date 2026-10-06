@@ -1,0 +1,38 @@
+'use strict';
+// Règles communes aux faux binaires `claude` (mono-coup et flux). Ce n'est pas une IA :
+// quelques règles suffisent à exercer le contrat {say, actions} en mode démo.
+module.exports = function reply(msg) {
+  const num = (re) => { const m = msg.match(re); return m ? Number(m[1].replace(',', '.')) : null; };
+  const actions = [];
+  const said = [];
+  const poids = num(/p[èe]se\s+(\d+(?:[.,]\d+)?)/i);
+  const km = num(/(\d+(?:[.,]\d+)?)\s*(?:km|kilom)/i);
+  const sommeil = num(/dormi\s+(\d+(?:[.,]\d+)?)/i);
+  if (poids != null) { actions.push({ type: 'log_metric', key: 'poids', label: 'Poids', unit: 'kg', agg: 'last', category: 'corps', value: poids }); said.push(`${poids} kilos`); }
+  if (km != null) { actions.push({ type: 'log_metric', key: 'course', label: 'Course', unit: 'km', agg: 'sum', category: 'sport', value: km }); said.push(`${km} kilomètres`); }
+  if (sommeil != null) { actions.push({ type: 'log_metric', key: 'sommeil', label: 'Sommeil', unit: 'h', agg: 'last', category: 'sommeil', value: sommeil }); said.push(`${sommeil} heures de sommeil`); }
+  if (/m[ée]dit/i.test(msg)) { actions.push({ type: 'log_metric', key: 'meditation', label: 'Méditation', unit: '', agg: 'check', category: 'esprit' }); said.push('la méditation'); }
+
+  const themeMatch = msg.match(/th[èe]me\s+([\p{L}]+)/iu);
+  if (themeMatch) {
+    const label = themeMatch[1];
+    const key = label.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_');
+    actions.unshift({ type: 'add_theme', key, label: label[0].toUpperCase() + label.slice(1) });
+    said.push(`le thème ${label}`);
+  }
+
+  const mv = msg.match(/d[ée]place[sz]?\s+(.+?)\s+vers\s+(.+?)(?:\s+sur\s+(.+))?$/i);
+  if (mv) { actions.push({ type: 'trello_move', board: (mv[3] || 'Homepedia').trim(), card: mv[1].trim(), toList: mv[2].trim() }); said.push(`déplacer « ${mv[1].trim()} »`); }
+  const cr = msg.match(/cr[ée]e?[sz]?\s+(?:une\s+)?carte\s+(.+?)\s+dans\s+(.+?)(?:\s+sur\s+(.+))?$/i);
+  if (cr) { actions.push({ type: 'trello_create', board: (cr[3] || 'Homepedia').trim(), list: cr[2].trim(), name: cr[1].trim() }); said.push(`créer la carte « ${cr[1].trim()} »`); }
+
+  const lt = msg.match(/lance\s+sur\s+(.+?)\s*:\s*(.+)$/i);
+  if (lt) { actions.push({ type: 'launch_task', project: lt[1].trim(), prompt: lt[2].trim() }); said.push(`lancer une tâche sur ${lt[1].trim()}`); }
+
+  let say;
+  if (actions.length) say = `C'est noté : ${said.join(', ')}.`;
+  else if (/stats|objectif|où j'en suis/i.test(msg)) { actions.push({ type: 'show_view', view: 'moi' }); say = 'Voilà tes chiffres. Réponse de démonstration : le vrai Ultron lirait le contexte.'; }
+  else if (/bilan/i.test(msg)) say = 'Tu as dormi combien d\'heures ?';
+  else say = 'Réponse de démonstration. Lance « npm start » pour parler au vrai Ultron.';
+  return { say, actions };
+};

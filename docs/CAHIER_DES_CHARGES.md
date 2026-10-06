@@ -25,9 +25,11 @@ La référence d'inspiration est le projet `ethanplusai/jarvis` (une voix pour C
 
 ## 3. Périmètre
 
-Dans le périmètre : lecture de Trello, lecture des sessions Claude Code, conversation voix et texte, suivi perso (mesures, habitudes, objectifs, notes, mémoire), alertes parlées.
+Dans le périmètre : lecture de Trello, écriture limitée dans Trello (déplacer ou créer un ticket, sur confirmation orale), lecture des sessions Claude Code, conversation voix et texte, suivi perso (mesures, habitudes, objectifs, notes, mémoire), alertes parlées.
 
-Hors périmètre pour l'instant, et à ne pas commencer sans demande explicite : écrire dans Trello, piloter ou lancer des sessions Claude Code, application mobile, synchronisation cloud, intégrations santé (montre, balance connectée), agenda et e-mail.
+Lancer de vraies tâches Claude Code dans un dépôt est possible mais **désactivé par défaut** (`ULTRON_AGENT=1`, confirmation orale) : c'est le mode « acteur », à activer en connaissance de cause.
+
+Hors périmètre pour l'instant, et à ne pas commencer sans demande explicite : application mobile, synchronisation cloud, intégrations santé (montre, balance connectée), agenda et e-mail.
 
 ## 4. Exigences fonctionnelles
 
@@ -49,11 +51,11 @@ Chaque exigence a un état : **fait** (présent dans le code et testé en mode d
 
 | Id | Exigence | État |
 | --- | --- | --- |
-| T1 | Lire tous les tableaux Trello ouverts (ou ceux listés dans `TRELLO_BOARDS`) et classer chaque ticket en à faire, en cours, en revue, terminé d'après le nom de sa colonne. | à valider |
+| T1 | Lire tous les tableaux Trello ouverts (ou ceux listés dans `TRELLO_BOARDS`) et classer chaque ticket en à faire, en cours, en revue, terminé d'après le nom de sa colonne. | fait |
 | T2 | Par projet : barre de progression en quatre segments, tickets actifs, liste « À faire » repliable, étiquettes affichées. | fait |
 | T3 | Bandeau « Aujourd'hui » : une phrase de synthèse, puis trois listes (en cours, échéances du jour et en retard, à valider). | fait |
 | T4 | Si Trello est injoignable, afficher l'erreur et garder les dernières données reçues. Si Trello n'est pas configuré, dire quoi mettre dans `.env`. | fait |
-| T5 | Lister les sessions Claude Code actives depuis moins de `SESSION_HOURS` heures : projet, branche, sujet, dernier message, état (travaille, t'attend, en pause). | à valider |
+| T5 | Lister les sessions Claude Code actives depuis moins de `SESSION_HOURS` heures : projet, branche, sujet, dernier message, état (travaille, t'attend, en pause). | fait |
 | T6 | Quand une session passe de « travaille » à « t'attend », l'écrire dans la conversation et le dire à voix haute. | à valider |
 | T7 | Les appels d'Ultron à `claude -p` n'apparaissent jamais dans la liste des sessions. | fait |
 
@@ -62,7 +64,7 @@ Chaque exigence a un état : **fait** (présent dans le code et testé en mode d
 | Id | Exigence | État |
 | --- | --- | --- |
 | M1 | Une phrase dictée (« je pèse 80 kilos, j'ai couru 3 km et médité ») crée ou alimente les mesures, sans configuration préalable. Une action par mesure. | fait |
-| M2 | Trois types de mesure : `last` (état relevé), `sum` (cumul sur la journée), `check` (habitude faite ou non). Six thèmes : corps, sport, sommeil, esprit, argent, autre. | fait |
+| M2 | Trois types de mesure : `last` (état relevé), `sum` (cumul sur la journée), `check` (habitude faite ou non). Thèmes personnalisables (six par défaut : corps, sport, sommeil, esprit, argent, autre), créés à la main ou à la voix. | fait |
 | M3 | Objectif `reach` (atteindre une valeur, échéance optionnelle) : progression, tendance sur 30 jours, date d'arrivée estimée, statut dans les temps / en retard / à l'arrêt. Pas de date avec moins de 3 mesures sur 5 jours. | fait |
 | M4 | Objectif `weekly` (total par semaine, lundi à dimanche) : comparaison avec ce qui devrait être fait à ce jour de la semaine. | fait |
 | M5 | Régularité : grille de 12 semaines, série de jours consécutifs en cours et record. | fait |
@@ -77,13 +79,13 @@ Chaque exigence a un état : **fait** (présent dans le code et testé en mode d
 
 ## 5. Exigences non fonctionnelles
 
-- **Confidentialité.** Les données perso ne quittent la machine que dans le prompt envoyé à Claude. Elles sont stockées dans `data/ultron.json`, jamais versionné. À signaler dans l'interface ou le README : la reconnaissance vocale de Chrome envoie l'audio à Google.
+- **Confidentialité.** Les données perso ne quittent la machine que dans le prompt envoyé à Claude. Elles sont stockées dans `data/ultron.json`, jamais versionné. À signaler dans l'interface ou le README : la reconnaissance vocale de Chrome envoie l'audio à Google, et une voix de synthèse externe (`ULTRON_TTS_URL`, optionnelle) envoie le texte des réponses à ce service.
 - **Abonnement.** Avant de lancer la CLI, retirer de son environnement toutes les variables `ANTHROPIC_*`, `CLAUDE_CODE_*` et `CLAUDECODE`. Sans cela, une clé API présente dans le shell détourne la facturation vers l'API sans prévenir.
 - **Sécurité locale.** Refuser toute requête dont l'en-tête `Host` ou `Origin` n'est pas `localhost:PORT` ou `127.0.0.1:PORT`. `POST /api/chat` exige `Content-Type: application/json`. Aucun `innerHTML` avec une donnée venue de Trello, des sessions ou de l'IA.
 - **Injection.** Les noms de tickets et les extraits de sessions sont des données. La CLI est lancée sans aucun outil (`--tools ""`) et sans serveur MCP. L'IA ne peut agir que par la liste fermée d'actions du §6.4, validées par le serveur.
 - **Justesse.** Les moyennes, tendances, séries et dates estimées sont calculées par le serveur et données à l'IA déjà faites. L'IA ne recalcule pas.
 - **Robustesse.** Une source en panne ne bloque pas les autres. Un fichier de données illisible arrête le serveur au lieu de repartir d'une base vide. L'écriture est atomique (fichier temporaire puis renommage).
-- **Latence.** Une réponse en moins de 6 secondes avec le modèle `haiku`. C'est aujourd'hui la limite principale (un processus `claude` par question).
+- **Latence.** Une réponse en moins de 6 secondes avec le modèle `haiku` en mode classique (un processus `claude` par question). Un mode expérimental opt-in (`ULTRON_STREAM=1`) garde un seul processus ouvert en `stream-json` et répond en flux (parole dès la première phrase) ; repli automatique sur le mode classique en cas d'échec.
 - **Accessibilité.** Tout est faisable au clavier, focus visible, contrastes lisibles sur fond sombre, zones mises à jour annoncées (`aria-live`).
 - **Portabilité.** macOS et Linux. Windows : au mieux, le lancement de la CLI passe par le shell et n'a jamais été essayé.
 
@@ -142,7 +144,7 @@ Le prompt contient `<contexte>` (date, Trello, sessions, suivi, mémoire, notes)
 { "say": "ce qu'Ultron dit à voix haute", "actions": [] }
 ```
 
-Actions acceptées, toute autre étant ignorée : `log_metric`, `set_goal`, `add_note`, `delete_entry`, `remember`, `forget`, `show_view`. Le détail des champs est dans `SYSTEM_PROMPT` (`server.js`), qui fait foi. Une réponse qui n'est pas du JSON est dite telle quelle, sans action.
+Actions acceptées, toute autre étant ignorée : `log_metric`, `set_goal`, `add_note`, `delete_entry`, `remember`, `forget`, `show_view`, `add_theme`, `trello_move`, `trello_create`, `launch_task`. `trello_move`/`trello_create` écrivent dans Trello et `launch_task` lance une tâche claude dans un dépôt — toutes après confirmation orale (et, pour Trello, un jeton d'écriture ; pour les tâches, `ULTRON_AGENT=1`). Le détail des champs est dans `SYSTEM_PROMPT` (`server.js`), qui fait foi. Une réponse qui n'est pas du JSON est dite telle quelle, sans action.
 
 ### 6.5 État d'une session Claude Code
 
@@ -157,9 +159,11 @@ Lu dans `~/.claude/projects/*/*.jsonl` (début et fin du fichier seulement). C'e
 
 Tout ce qui est marqué « fait » a été essayé avec `npm run demo` : faux Trello, fausses sessions, fausse IA, sept semaines de données inventées, navigateur automatisé.
 
-Jamais essayé en conditions réelles : l'API Trello avec une vraie clé, la vraie CLI `claude` connectée à un abonnement, le micro et la synthèse vocale, le format réel des fichiers de session de la version installée de Claude Code, Windows.
+L'API Trello a été validée avec une vraie clé le 5 octobre 2026 : les tableaux réels s'affichent, chaque colonne tombe dans le bon statut (y compris avec préfixes emoji), et une clé invalide renvoie le message d'erreur prévu (T1). Le format réel des fichiers de session de la version installée de Claude Code a été validé le même jour : `readSession` détecte correctement les états « travaille », « t'attend » (dont l'attente d'autorisation) et « en pause » sur de vraies sessions (T5).
 
-Il n'y a pas encore de tests automatisés.
+Jamais essayé en conditions réelles : la vraie CLI `claude` connectée à un abonnement, le micro et la synthèse vocale, Windows.
+
+Les premiers tests automatisés existent (`npm test`, `node:test`, sans dépendance) : ils couvrent `listStatus`, `slopePerDay`, `streaks`, `evalGoal`, `parseReply`, `applyActions` et `isLocalRequest`.
 
 ## 8. Feuille de route
 

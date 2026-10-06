@@ -650,6 +650,7 @@ if ('speechSynthesis' in window) speechSynthesis.getVoices(); // déclenche le c
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const WAKE = /\b(ultron\w*|ultra)\b[\s,.!?:]*/i; // « ultra » : ce que Chrome entend souvent à la place
 let rec = null, recMode = null, heard = '', silent = false;
+let wakeBuf = '', wakeTimer = null; // écoute continue : accumulation après « Ultron », envoi sur silence
 
 function startRec(mode) {
   if (!SR || rec || ui.busy || ui.speaking) return;
@@ -672,8 +673,10 @@ function startRec(mode) {
       if (mode === 'ptt') heard += ' ' + t;
       else onWakeFinal(t);
     }
-    const live = (heard + interim).trim();
-    if (live && (mode === 'ptt' || Date.now() < ui.armedUntil || WAKE.test(live))) {
+    // Tant qu'on capte une phrase après « Ultron », on repousse l'envoi et on garde la fenêtre ouverte.
+    if (mode === 'wake' && interim.trim() && wakeBuf) { ui.armedUntil = Date.now() + 8000; wakeArmFlush(); }
+    const live = ((mode === 'wake' ? wakeBuf : heard) + interim).trim();
+    if (live && (mode === 'ptt' || Date.now() < ui.armedUntil || wakeBuf || WAKE.test(live))) {
       hintEl.textContent = live; hintEl.classList.add('heard');
     }
   };
@@ -702,20 +705,38 @@ function startRec(mode) {
 }
 
 function stopRec(discard) {
+  if (discard) { wakeBuf = ''; clearTimeout(wakeTimer); wakeTimer = null; }
   if (!rec) return;
   if (discard) { silent = true; try { rec.abort(); } catch {} }
   else { try { rec.stop(); } catch {} }
 }
 
+// Envoie ce qui a été accumulé après « Ultron », une fois la parole retombée.
+function wakeFlush() {
+  clearTimeout(wakeTimer); wakeTimer = null;
+  const text = wakeBuf.trim(); wakeBuf = '';
+  ui.armedUntil = 0;
+  if (text.length > 1) return send(text, true);
+  if (!ui.busy && !ui.speaking) setCore('idle');
+}
+// (Re)programme l'envoi après ~1,4 s de silence : tant que tu parles, on repousse.
+function wakeArmFlush() { clearTimeout(wakeTimer); wakeTimer = setTimeout(wakeFlush, 1400); }
+
 function onWakeFinal(text) {
-  if (Date.now() < ui.armedUntil) { ui.armedUntil = 0; return send(text, true); }
-  const m = text.match(WAKE);
-  if (!m) return;
-  const rest = text.slice(m.index + m[0].length).trim();
-  if (rest.length > 2) return send(rest, true);
-  ui.armedUntil = Date.now() + 8000; // « Ultron » seul : la phrase suivante est pour lui
+  const capturing = !!wakeBuf;
+  const armed = Date.now() < ui.armedUntil;
+  let piece = text;
+  if (!capturing && !armed) {
+    const m = text.match(WAKE);
+    if (!m) return;                                   // pas réveillé et pas de « Ultron » : on ignore
+    piece = text.slice(m.index + m[0].length).trim(); // ce qui suit « Ultron » dans le même segment
+  }
+  ui.armedUntil = Date.now() + 8000;                  // garder la fenêtre ouverte tant qu'on parle
   setCore('listening');
-  setTimeout(() => { if (ui.armedUntil && Date.now() >= ui.armedUntil && !ui.busy && !ui.speaking) { ui.armedUntil = 0; setCore('idle'); } }, 8100);
+  if (piece) { wakeBuf = (wakeBuf + ' ' + piece).trim(); wakeArmFlush(); } // du contenu : on prévoit l'envoi
+  else { // « Ultron » seul : on attend la phrase, et on retombe en veille si rien ne vient
+    setTimeout(() => { if (!wakeBuf && Date.now() >= ui.armedUntil && !ui.busy && !ui.speaking) { ui.armedUntil = 0; setCore('idle'); } }, 8100);
+  }
 }
 
 function resumeWake() {

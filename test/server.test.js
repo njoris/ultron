@@ -36,6 +36,21 @@ test('listStatus reconnaît les variantes courantes', () => {
   assert.equal(S.listStatus('Fini'), 'done');
 });
 
+/* ───────────── dedupeSessions (S6-2) ───────────── */
+
+test('dedupeSessions garde une seule session par dossier+branche+sujet (la plus récente)', () => {
+  const items = [
+    { cwd: '/dev/ia', branch: 'main', title: 'où en est', updatedAt: '2026-10-06T10:00:00Z' },
+    { cwd: '/dev/ia', branch: 'main', title: 'où en est', updatedAt: '2026-10-05T10:00:00Z' }, // doublon plus ancien
+    { cwd: '/dev/ia', branch: 'main', title: 'autre sujet', updatedAt: '2026-10-06T09:00:00Z' },
+    { cwd: '/dev/autre', branch: 'main', title: 'où en est', updatedAt: '2026-10-06T08:00:00Z' },
+  ];
+  const out = S.dedupeSessions(items);
+  assert.equal(out.length, 3);
+  assert.equal(out[0].updatedAt, '2026-10-06T10:00:00Z'); // on garde la plus récente du doublon
+  assert.ok(!out.some((s) => s.updatedAt === '2026-10-05T10:00:00Z'));
+});
+
 /* ───────────── currentSprint (S3-1) ───────────── */
 
 test('currentSprint prend le sprint le plus récent non terminé', () => {

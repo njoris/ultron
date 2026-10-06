@@ -362,6 +362,20 @@ async function readSession(file, stat) {
   };
 }
 
+// Plusieurs fichiers .jsonl peuvent décrire la même session (reprise, fork) : on n'en garde qu'une,
+// la plus récente, par (dossier + branche + sujet). `items` doit être trié du plus récent au plus ancien.
+function dedupeSessions(items) {
+  const seen = new Set();
+  const out = [];
+  for (const s of items) {
+    const key = `${s.cwd || s.project}|${s.branch || ''}|${s.title || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
 async function getSessions() {
   if (sessionCache.data && Date.now() - sessionCache.at < 8000) return sessionCache.data;
   const base = path.join(CFG.claudeHome, 'projects');
@@ -392,7 +406,7 @@ async function getSessions() {
         items.push(s);
       } catch { /* session illisible : on l'ignore */ }
     }
-    result.items = items;
+    result.items = dedupeSessions(items);
   } catch (e) {
     if (e.code !== 'ENOENT') result.error = e.message;
   }
@@ -1378,7 +1392,7 @@ if (require.main === module) start();
 // Exposé pour les tests. __setDb/__getDb donnent accès à l'état en mémoire sans toucher à data/.
 module.exports = {
   listStatus, currentSprint, slopePerDay, streaks, evalGoal, applyActions, parseReply, isLocalRequest,
-  claudeEnv, entriesToCsv, streamEvent, normalizeUsage, addDays, CFG,
+  claudeEnv, entriesToCsv, streamEvent, normalizeUsage, dedupeSessions, addDays, CFG,
   __setDb: (next) => { db = next; },
   __getDb: () => db,
 };

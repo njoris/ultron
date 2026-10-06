@@ -137,7 +137,14 @@
 
   .sess { padding: 12px 0; border-top: 1px solid var(--steel-700); }
   .sess:first-child { border-top: 0; padding-top: 0; }
-  .sess .top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .sess .top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; width: 100%; background: none; border: 0; padding: 0; text-align: left; color: inherit; font: inherit; cursor: pointer; }
+  .sess .top:hover .who { color: var(--bone); }
+  .sess.open .who::before { content: '▾ '; color: var(--fog); }
+  .sess:not(.open) .top .who::before { content: '▸ '; color: var(--fog); }
+  .sess-hist { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; border-top: 1px solid var(--steel-700); padding-top: 10px; }
+  .sess-hist .hmsg { font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .sess-hist .hmsg.user { color: var(--bone); border-left: 2px solid var(--line); padding-left: 8px; }
+  .sess-hist .hmsg.assistant { color: var(--fog); }
   .sess .who { font-weight: 600; font-size: 16px; overflow-wrap: anywhere; }
   .sess .who small { color: var(--fog); font-weight: 400; font-size: 13px; margin-left: 6px; }
   .state { font-size: 13px; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
@@ -905,14 +912,33 @@ function sessionBoard(x) {
   const p = normName(x.project);
   return boards.find((b) => normName(b.name) === p) || null;
 }
+let openSessionId = null;      // session dont l'historique est déplié
+const sessionTx = {};          // cache id -> messages
+async function toggleSession(id) {
+  openSessionId = openSessionId === id ? null : id;
+  renderSessions(); renderProjects();
+  if (openSessionId === id && !sessionTx[id]) {
+    try { const r = await fetch('/api/session/' + encodeURIComponent(id)); sessionTx[id] = r.ok ? (await r.json()).messages : []; }
+    catch { sessionTx[id] = []; }
+    if (openSessionId === id) { renderSessions(); renderProjects(); }
+  }
+}
+function sessionHistory(id) {
+  const msgs = sessionTx[id];
+  if (!msgs) return h('p', { class: 'sub' }, 'Chargement…');
+  if (!msgs.length) return h('p', { class: 'sub' }, 'Pas de messages lisibles pour cette session.');
+  return h('div', { class: 'sess-hist' }, msgs.map((m) => h('div', { class: `hmsg ${m.role}` }, m.text)));
+}
 function sessCard(x) {
-  return h('div', { class: 'sess' },
-    h('div', { class: 'top' },
+  const open = openSessionId === x.id;
+  return h('div', { class: 'sess' + (open ? ' open' : '') },
+    h('button', { class: 'top', type: 'button', 'aria-expanded': String(open), onclick: () => toggleSession(x.id) },
       h('span', { class: 'who' }, x.project, x.branch ? h('small', null, x.branch) : null),
       h('span', { class: `state ${x.state}` }, `${STATE_LABEL[x.state]}, ${ago(x.updatedAt)}`)),
     h('p', { class: 'title' }, x.title),
     x.pending ? h('p', { class: 'pending' }, x.pending) : null,
-    x.lastReply ? h('p', null, x.lastReply) : null);
+    x.lastReply ? h('p', null, x.lastReply) : null,
+    open ? sessionHistory(x.id) : null);
 }
 
 // S5-1/S5-2 : tâches Claude Code lancées par Ultron.

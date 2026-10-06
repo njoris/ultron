@@ -414,6 +414,34 @@ async function getSessions() {
   return result;
 }
 
+// S6-4 : retrouver le fichier d'une session par son id, en restant sous ~/.claude/projects.
+async function findSessionFile(id) {
+  if (!/^[\w-]+$/.test(id)) return null; // pas de traversée de chemin
+  const base = path.join(CFG.claudeHome, 'projects');
+  let dirs = [];
+  try { dirs = await fsp.readdir(base, { withFileTypes: true }); } catch { return null; }
+  for (const d of dirs) {
+    if (!d.isDirectory()) continue;
+    const file = path.join(base, d.name, `${id}.jsonl`);
+    try { const stat = await fsp.stat(file); if (stat.isFile()) return { file, stat }; } catch { /* suivant */ }
+  }
+  return null;
+}
+
+// Historique lisible d'une session (40 derniers messages user/assistant). Lecture seule.
+async function readTranscript(file, stat) {
+  const MAX = 256 * 1024;
+  const start = Math.max(0, stat.size - MAX);
+  const lines = parseJsonl(await readChunk(file, start, stat.size - start), start > 0, false);
+  const msgs = [];
+  for (const l of lines) {
+    if (l.isSidechain) continue;
+    if (l.type === 'user' && isHumanPrompt(l)) msgs.push({ role: 'user', text: clip(textOf(l.message).trim().replace(/\s+/g, ' '), 2000) });
+    else if (l.type === 'assistant') { const t = textOf(l.message).trim(); if (t) msgs.push({ role: 'assistant', text: clip(t.replace(/\s+/g, ' '), 2000) }); }
+  }
+  return msgs.slice(-40);
+}
+
 /* ───────────────────────── suivi perso ───────────────────────── */
 
 // Thèmes : désormais des données (db.themes), pas une liste figée. Six par défaut ; on peut en créer d'autres,
@@ -1332,6 +1360,15 @@ const server = http.createServer(async (req, res) => {
       if (db[coll].length === before) return sendJson(res, 404, { error: 'Introuvable.' });
       saveDb();
       return sendJson(res, 200, { ok: true });
+    }
+
+    // Historique d'une session Claude Code (S6-4), lecture seule.
+    const sessRoute = url.pathname.match(/^\/api\/session\/([\w-]+)$/);
+    if (req.method === 'GET' && sessRoute) {
+      const found = await findSessionFile(sessRoute[1]);
+      if (!found) return sendJson(res, 404, { error: 'Session introuvable.' });
+      try { return sendJson(res, 200, { id: sessRoute[1], messages: await readTranscript(found.file, found.stat) }); }
+      catch (e) { return sendJson(res, 502, { error: e.message }); }
     }
 
     // Export CSV de toutes les mesures.

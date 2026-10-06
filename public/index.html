@@ -82,9 +82,12 @@
   .btn:disabled { opacity: .45; cursor: default; }
   .btn.quiet { background: none; color: var(--bone); border: 1px solid var(--line); font-weight: 500; }
   .btn.quiet:hover { border-color: var(--fog); }
-  .toggles { display: flex; gap: 18px; margin-top: 12px; color: var(--fog); font-size: 14px; }
-  .toggles label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
-  .toggles input { accent-color: var(--ember); width: 15px; height: 15px; margin: 0; }
+  .gear { background: none; border: 1px solid var(--line); border-radius: 8px; color: var(--fog); font-size: 17px; line-height: 1; padding: 0 11px; cursor: pointer; }
+  .gear:hover, .gear[aria-expanded="true"] { border-color: var(--fog); color: var(--bone); }
+  .settings { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; padding: 12px 14px; background: var(--steel-900); border: 1px solid var(--line); border-radius: 8px; color: var(--fog); font-size: 14px; }
+  .settings label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .settings input[type="checkbox"] { accent-color: var(--ember); width: 15px; height: 15px; margin: 0; }
+  .settings input[type="time"] { margin-left: auto; background: var(--steel-800); border: 1px solid var(--line); border-radius: 6px; color: var(--bone); padding: 4px 7px; font: inherit; }
 
   /* ── colonne de droite : le tableau de bord ── */
   .board { padding: 24px clamp(20px, 4vw, 56px) 64px; min-width: 0; }
@@ -255,8 +258,9 @@
     <form class="ask" id="ask">
       <input id="q" type="text" autocomplete="off" placeholder="Écris à Ultron" aria-label="Écrire à Ultron">
       <button class="btn" id="go" type="submit">Envoyer</button>
+      <button class="gear" id="settings-btn" type="button" aria-label="Réglages" aria-expanded="false" aria-controls="settings-panel" title="Réglages">⚙</button>
     </form>
-    <div class="toggles">
+    <div class="settings" id="settings-panel" hidden>
       <label><input type="checkbox" id="wake"> Écoute continue</label>
       <label><input type="checkbox" id="speak"> Réponses à voix haute</label>
       <label>Rappel du soir <input type="time" id="reminder"></label>
@@ -574,6 +578,19 @@ $('#ask').addEventListener('submit', (e) => {
   q.value = '';
   send(text);
 });
+
+// Menu de réglages (engrenage) : regroupe écoute continue, voix et rappel du soir.
+function toggleSettings(open) {
+  const panel = $('#settings-panel');
+  const show = open === undefined ? panel.hidden : open;
+  panel.hidden = !show;
+  $('#settings-btn').setAttribute('aria-expanded', String(show));
+}
+$('#settings-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleSettings(); });
+document.addEventListener('click', (e) => {
+  if (!$('#settings-panel').hidden && !e.target.closest('#settings-panel') && e.target !== $('#settings-btn')) toggleSettings(false);
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#settings-panel').hidden) toggleSettings(false); });
 
 /* ───────────────────────── synthèse vocale ───────────────────────── */
 let envPulse = 0, envAt = 0;
